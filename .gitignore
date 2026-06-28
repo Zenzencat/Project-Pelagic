@@ -6,11 +6,12 @@ venv/
 .env
 
 # Datasets & DB
-data/
-checkpoints/
-logs/
+# Ignore raw downloads and processed outputs
+data/raw/
+data/processed/
+# Note: data/synthetic/ and data/pelagic.db are tracked
 
-# Node / Frontend
+# Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
