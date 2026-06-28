@@ -11,6 +11,9 @@ data/raw/
 data/processed/
 # Note: data/synthetic/ and data/pelagic.db are tracked
 
+# Models & Logs
+checkpoints/
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
