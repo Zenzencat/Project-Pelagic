@@ -1,0 +1,103 @@
+# Project Pelagic: System Architecture Design
+**SWU Prasarnmit — AI Engineering Track (Final Project Checkpoint 1)**
+
+This document defines the system architecture for **Project Pelagic**, a proof-of-concept (PoC) system for detecting oil slicks in Sentinel-1 Synthetic Aperture Radar (SAR) imagery. 
+
+---
+
+## 1. Architecture Overview (ภาพรวมสถาปัตยกรรมระบบ)
+
+The system utilizes a lightweight, modular architecture designed for local development and demonstration. It is structured into five distinct layers:
+1. **Frontend (ส่วนแสดงผลผู้ใช้งาน)**: A React-based web dashboard using Leaflet.js to display satellite footprints, detection mask overlays, and nearby AIS vessel coordinates.
+2. **Backend API (ส่วนบริการข้อมูล)**: A FastAPI service serving REST endpoints for model inference, spatial queries, and mock AIS telemetry.
+3. **Database (ระบบฐานข้อมูล)**: An SQLite database storing detection history, geo-coordinates, confidence scores, and surrounding AIS vessel telemetry.
+4. **Model Inference Layer (ส่วนประมวลผลโมเดล AI)**: A PyTorch-trained U-Net segmentation model exported to ONNX format for high-performance, CPU-friendly inference.
+5. **Data Storage (ส่วนจัดเก็บข้อมูล)**: Local file storage containing raw Sentinel-1 GeoTIFF scenes and output binary segmentation masks.
+
+---
+
+## 2. System Architecture Diagram (แผนภาพสถาปัตยกรรมระบบ)
+
+The diagram below maps the relationships and data flow between the system components.
+
+```mermaid
+graph TD
+  %% Style definitions
+  classDef frontend fill:#d4ebf2,stroke:#1a73e8,stroke-width:2px;
+  classDef backend fill:#e6ffed,stroke:#28a745,stroke-width:2px;
+  classDef db fill:#fff3cd,stroke:#ffc107,stroke-width:2px;
+  classDef ml fill:#fce8e6,stroke:#ea4335,stroke-width:2px;
+  classDef storage fill:#f1f3f4,stroke:#5f6368,stroke-width:2px;
+
+  subgraph FE ["Frontend Layer (ส่วนแสดงผล)"]
+    UI["Map Dashboard (React)"]:::frontend
+    Map["Interactive Map (Leaflet.js)"]:::frontend
+  end
+
+  subgraph BE ["Backend Layer (ส่วนบริการข้อมูล)"]
+    API["FastAPI Web API"]:::backend
+    PredictRouter["POST /predict Endpoint"]:::backend
+    HistoryRouter["GET /detections Endpoint"]:::backend
+  end
+
+  subgraph DB ["Database Layer (ระบบฐานข้อมูล)"]
+    SQLite["SQLite Database"]:::db
+  end
+
+  subgraph ML ["Model Layer (โมเดลการประมวลผล)"]
+    Inference["ONNX Runtime (CPU/GPU)"]:::ml
+    ModelFile["Trained U-Net Model (ResNet Backbone)"]:::ml
+  end
+
+  subgraph ST ["File Storage (ส่วนจัดเก็บไฟล์)"]
+    RawScenes["Raw Sentinel-1 GeoTIFFs"]:::storage
+    PredictMasks["Generated Binary Mask PNGs"]:::storage
+  end
+
+  %% Data Flow & Interactions
+  UI <-->|Fetch detections & AIS| HistoryRouter
+  UI -->|Upload / Trigger analysis| PredictRouter
+  
+  PredictRouter -->|Read SAR patch| RawScenes
+  PredictRouter -->|Run Preprocessing & Inference| Inference
+  Inference -->|Load weights| ModelFile
+  
+  Inference -->|Generate & Save mask| PredictMasks
+  PredictRouter -->|Write metadata & bbox| SQLite
+  HistoryRouter -->|Query records| SQLite
+
+  Map -->|Render overlay tile| PredictMasks
+```
+
+---
+
+## 3. Component Details (รายละเอียดส่วนประกอบระบบ)
+
+### 3.1 React + Leaflet.js Frontend
+* **Purpose**: Serves as the operator dashboard. It displays the geographical boundaries (footprints) of processed Sentinel-1 scenes and overlays the binary segmentation masks corresponding to detected oil slicks.
+* **AIS Overlay**: Pulls coordinates of nearby vessels from the backend to overlay AIS tracks, allowing operators to visually correlate oil slicks with vessels in the vicinity.
+
+### 3.2 FastAPI Backend
+* **`POST /predict`**: Accepts a scene ID or coordinates, extracts the corresponding SAR patches, runs preprocessing, executes U-Net segmentation, and saves the output mask.
+* **`GET /detections`**: Queries the SQLite database to fetch historical detections with coordinates, timestamps, and confidence scores for rendering on the map.
+
+### 3.3 U-Net ONNX Inference Engine
+* **ONNX Runtime**: Running inference using ONNX format ensures the backend API remains decoupled from heavy training-centric libraries like PyTorch, optimizing deployment size and inference speed on target devices.
+
+### 3.4 SQLite Database
+* Stores structured metadata rather than raw spatial polygons to avoid the configuration complexity of PostGIS during early academic presentation. Features, coordinates, and bounding boxes are stored as standardized GeoJSON strings.
+
+---
+
+## 4. Thai Terminology Key (ตารางคำศัพท์เทคนิคภาษาไทย)
+
+| English Term | Thai Translation | Description / Context |
+| :--- | :--- | :--- |
+| **System Architecture** | สถาปัตยกรรมระบบ | การวางโครงสร้างและองค์ประกอบหลักต่าง ๆ ของระบบ |
+| **Proof of Concept (PoC)** | โครงการต้นแบบเพื่อพิสูจน์แนวคิด | ตัวต้นแบบที่มีฟังก์ชันเพียงพอต่อการทดสอบสมมติฐาน |
+| **Binary Semantic Segmentation** | การแบ่งส่วนภาพเชิงความหมายแบบสองส่วน | การจัดกลุ่มพิกเซลในภาพออกเป็น 2 กลุ่ม (คราบน้ำมัน vs พื้นหลัง) |
+| **Model Inference** | การอนุมานโมเดล / การประมวลผลของโมเดล | การนำโมเดลที่ฝึกสอนเสร็จแล้วมาใช้ประมวลผลข้อมูลใหม่ |
+| **Speckle Noise** | สัญญาณรบกวนแบบจุดระยิบระยับ | สัญญาณรบกวนเฉพาะตัวในภาพถ่ายดาวเทียมเรดาร์ (SAR) |
+| **AIS Overlay** | การซ้อนทับข้อมูลระบบระบุตัวตนเรือ | การนำจุดพิกัดการเดินเรือ (AIS) มาพล็อตทับลงบนแผนที่ |
+| **Bounding Box** | กรอบล้อมรอบวัตถุ | กรอบสี่เหลี่ยมที่กำหนดขอบเขตพื้นที่ที่ตรวจพบคราบน้ำมัน |
+| **VV/VH Polarization** | โพลาไรเซชันแบบ VV/VH | ทิศทางการส่งและรับสัญญาณคลื่นเรดาร์ในแนวดิ่งและแนวราบ |
