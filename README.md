@@ -9,7 +9,7 @@ Project Pelagic is a C-band Synthetic Aperture Radar (SAR) maritime oil slick de
 
 ```
 Project-Pelagic/
-├── checkpoints/          # PyTorch model weights (best_model.pth) [Tracked]
+├── checkpoints/          # PyTorch model weights (model_real_best.pt) [Tracked]
 ├── data/                 # Raw/processed/synthetic imagery & databases
 │   ├── synthetic/        # Generated synthetic SAR scenes for testing
 │   └── pelagic.db        # SQLite database containing seeded mock detections
@@ -25,11 +25,13 @@ Project-Pelagic/
 │   │   ├── App.jsx       # Main single-page React UI code
 │   │   └── index.css     # CSS themes and Leaflet overrides
 │   └── package.json
+├── kaggle_kernel/        # Training script & metadata for Kaggle runner
+├── kaggle_eval_kernel/   # Inference evaluation script for held-out test set
 ├── src/                  # Core Python modules
 │   ├── api/              # FastAPI endpoints & SQLite database logic
 │   ├── data/             # Ingestion pipelines & dataset loaders
-│   ├── models/           # U-Net, loss functions, & validation metrics
-│   ├── train.py          # Main training orchestrator loop
+│   ├── models/           # U-Net architecture definition
+│   ├── train.py          # Local training orchestrator loop
 │   └── verify_training.py # Verification harness for CPU training runs
 ├── requirements.txt      # Python dependencies list
 └── README.md
@@ -130,11 +132,37 @@ python src/data/download_sample.py --part 1 --include-images
 
 ---
 
-## 🧪 Model Training & Verification
+## 🧪 Model Training, Verification & Kaggle Execution
 
-To verify that the U-Net model trains successfully on your local machine:
+### 1. Local CPU Verification Check
+To verify that the U-Net data ingestion and model architecture run successfully on your machine:
 ```bash
-# Run a quick 2-epoch CPU test verify script
+# Run a quick 2-epoch CPU mock verification run
 python src/verify_training.py
 ```
-This saves weight checkpoints in `checkpoints/` and logs history in `logs/training_history.csv`.
+
+### 2. Real Dataset Training (Kaggle T4 GPU)
+For full-scale training on the real Sentinel-1 dataset (Parts I & II, 1,885 scenes), we use Kaggle's T4 GPU accelerator to handle the heavy computations.
+* The script is located in `kaggle_kernel/train_kaggle.py`.
+* To push the training job to Kaggle via their CLI:
+  ```bash
+  kaggle kernels push -p kaggle_kernel
+  ```
+The trained best checkpoint is saved locally as **`checkpoints/model_real_best.pt`** (Val Dice: **0.8071**).
+
+### 3. Held-Out Part III Test Set Evaluation
+We evaluated the best checkpoint on the completely unseen held-out Part III test set (450 scenes). The evaluation script runs batch GPU inference:
+* The script is located in `kaggle_eval_kernel/eval_kaggle.py`.
+* Push the evaluation job:
+  ```bash
+  kaggle kernels push -p kaggle_eval_kernel
+  ```
+
+#### Evaluation Metrics Results:
+* **Oil Scenes (Positive Class, Pixel-Level Segmentation)**:
+  * **Intersection over Union (IoU)**: `0.7246`
+  * **Dice Coefficient (F1-score)**: `0.8172`
+  * **Precision**: `0.8717`
+  * **Recall**: `0.8399`
+* **No Oil background scenes perfect suppression rate**: `61.33%`
+* **Lookalike feature scenes perfect suppression rate**: `2.67%`
