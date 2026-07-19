@@ -22,3 +22,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Large checkpoints & temp Kaggle folders
+checkpoints/model_real_final.pt
+kaggle_model_dataset/
+kaggle_output/
+kaggle_eval_output/

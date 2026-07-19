@@ -42,7 +42,7 @@ app.add_middleware(
 
 # 2. Setup paths and check U-Net checkpoint
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CHECKPOINT_PATH = os.path.join(BASE_DIR, "checkpoints", "best_model.pth")
+CHECKPOINT_PATH = os.path.join(BASE_DIR, "checkpoints", "model_real_best.pt")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = None
@@ -53,11 +53,16 @@ if os.path.exists(CHECKPOINT_PATH):
     try:
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
         model = UNet(in_channels=2, out_channels=1)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            epoch = checkpoint['epoch']
+        else:
+            model.load_state_dict(checkpoint)
+            epoch = "N/A"
         model.to(device)
         model.eval()
         model_loaded = True
-        print(f"[+] U-Net model loaded successfully on device: {device} (Epoch: {checkpoint['epoch']})")
+        print(f"[+] U-Net model loaded successfully on device: {device} (Epoch: {epoch})")
     except Exception as e:
         print(f"[!] Warning: Failed to load U-Net checkpoint: {e}", file=sys.stderr)
 else:
