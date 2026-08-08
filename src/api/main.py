@@ -42,7 +42,7 @@ app.add_middleware(
 
 # 2. Setup paths and check U-Net checkpoint
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CHECKPOINT_PATH = os.path.join(BASE_DIR, "checkpoints", "model_real_best.pt")
+CHECKPOINT_PATH = os.path.join(BASE_DIR, "checkpoints", "model_real_v2_best.pt")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = None
@@ -162,12 +162,14 @@ def predict(payload: PredictRequest):
         )
         
     scene_id = payload.scene_id
-    img_path = os.path.join(BASE_DIR, "data", "synthetic", "images", f"{scene_id}.tif")
+    img_path = os.path.join(BASE_DIR, "data", "holdout", "images", f"{scene_id}.tif")
+    if not os.path.exists(img_path):
+        img_path = os.path.join(BASE_DIR, "data", "synthetic", "images", f"{scene_id}.tif")
     
     if not os.path.exists(img_path):
         raise HTTPException(
             status_code=404,
-            detail=f"SAR Scene file '{scene_id}.tif' not found in synthetic dataset."
+            detail=f"SAR Scene file '{scene_id}.tif' not found in holdout or synthetic datasets."
         )
         
     # 1. Read GeoTIFF image (VV, VH channels)
@@ -177,10 +179,22 @@ def predict(payload: PredictRequest):
         raise HTTPException(status_code=500, detail=f"Error reading GeoTIFF: {e}")
         
     # 2. Run Preprocessing
-    sig = calibrate_to_sigma(image_raw)
-    filt = speckle_filter(sig, window_size=5)
-    db = to_decibels(filt)
-    norm = normalize_image(db)
+    if np.any(image_raw < 0):
+        # Already in dB scale (Real Sentinel-1 imagery)
+        if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
+            image_raw = image_raw.transpose(1, 2, 0)
+        # Convert to linear for speckle filtering
+        linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
+        filt = speckle_filter(linear, window_size=5)
+        # Convert back to dB
+        db = 10.0 * np.log10(np.clip(filt, 1e-5, None))
+        norm = normalize_image(db)
+    else:
+        # Linear scale (Synthetic data)
+        sig = calibrate_to_sigma(image_raw)
+        filt = speckle_filter(sig, window_size=5)
+        db = to_decibels(filt)
+        norm = normalize_image(db)
     
     # 3. U-Net Inference
     # Model takes [B, C, H, W] -> [1, 2, H, W]
