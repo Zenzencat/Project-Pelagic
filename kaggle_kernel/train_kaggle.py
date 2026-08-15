@@ -124,13 +124,15 @@ def to_decibels(image_linear, eps=1e-5):
 def normalize_image(image_db, min_db=-25.0, max_db=0.0):
     clipped = np.clip(image_db, min_db, max_db)
     return (clipped - min_db) / (max_db - min_db)
-
-def extract_patches_balanced(image, mask, patch_size=256, stride=128, is_oil_scene=True):
+def extract_patches_balanced(image, mask, patch_size=256, stride=128, category="oil"):
     """
     Extracts patches from a 2048x2048 image.
     Optimizes memory footprint to prevent Kaggle OOM (16GB RAM limit).
     Keeps 100% of patches with positive slick pixels.
-    Downsamples background patches to 1% for oil scenes, 0.2% for negative scenes.
+    Downsamples background patches based on category:
+      - oil: 1.0% (prob = 0.01)
+      - lookalike: 0.5% (prob = 0.005) -> Oversampled 2.5x relative to clean sea!
+      - no_oil: 0.2% (prob = 0.002)
     Forces copies to prevent NumPy views from holding the large base image in memory.
     """
     H, W = image.shape[:2]
@@ -148,14 +150,20 @@ def extract_patches_balanced(image, mask, patch_size=256, stride=128, is_oil_sce
                     image_patches.append(img_patch.copy())
                     mask_patches.append(mask_patch.copy())
                 else:
-                    prob = 0.01 if is_oil_scene else 0.002
+                    if category == "oil":
+                        prob = 0.01
+                    elif category == "lookalike":
+                        prob = 0.005
+                    else:
+                        prob = 0.002
+                        
                     if random.random() < prob:
                         image_patches.append(img_patch.copy())
                         mask_patches.append(mask_patch.copy())
                         
     return image_patches, mask_patches
 
-def run_full_preprocessing(image_raw, mask_raw, patch_size=256, stride=128, is_oil_scene=True):
+def run_full_preprocessing(image_raw, mask_raw, patch_size=256, stride=128, category="oil"):
     if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
         image_raw = image_raw.transpose(1, 2, 0)
         
@@ -172,8 +180,7 @@ def run_full_preprocessing(image_raw, mask_raw, patch_size=256, stride=128, is_o
     min_db, max_db = -25.0, 0.0
     norm = (np.clip(db, min_db, max_db) - min_db) / (max_db - min_db)
     
-    return extract_patches_balanced(norm, mask_raw, patch_size, stride, is_oil_scene)
-
+    return extract_patches_balanced(norm, mask_raw, patch_size, stride, category)
 class SARDataset(Dataset):
     def __init__(self, image_patches, mask_patches, augment=False):
         self.images = image_patches
@@ -224,7 +231,7 @@ def get_real_dataloaders(patch_size=256, stride=128, batch_size=8, train_ratio=0
         all_pairs.append({
             "mask_path": mask_path,
             "img_path": img_path,
-            "is_oil": True
+            "category": "oil"
         })
         
     # 2. Compare and Deduplicate Part II at the IMAGE level (not mask level)
@@ -294,7 +301,7 @@ def get_real_dataloaders(patch_size=256, stride=128, batch_size=8, train_ratio=0
         all_pairs.append({
             "mask_path": mask_path,
             "img_path": img_path,
-            "is_oil": False
+            "category": "lookalike"
         })
         
     # 4. Add Deduplicated No-Oil pairs
@@ -306,7 +313,7 @@ def get_real_dataloaders(patch_size=256, stride=128, batch_size=8, train_ratio=0
         all_pairs.append({
             "mask_path": mask_path,
             "img_path": img_path,
-            "is_oil": False
+            "category": "no_oil"
         })
         
     random.seed(seed)
@@ -331,7 +338,7 @@ def get_real_dataloaders(patch_size=256, stride=128, batch_size=8, train_ratio=0
             mask_raw = cv2.imread(pair["mask_path"], cv2.IMREAD_GRAYSCALE)
             image_raw = tifffile.imread(pair["img_path"])
             
-            img_p, mask_p = run_full_preprocessing(image_raw, mask_raw, patch_size, stride, pair["is_oil"])
+            img_p, mask_p = run_full_preprocessing(image_raw, mask_raw, patch_size, stride, pair["category"])
             img_patches.extend(img_p)
             mask_patches.extend(mask_p)
             
@@ -535,11 +542,12 @@ def train_and_evaluate():
     model = UNet(in_channels=2, out_channels=1).to(device)
     criterion = BCEDiceLoss(alpha=1.0, beta=1.0)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
     scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
     
     print("\n=== STARTING TRAINING FRESH FROM SCRATCH ===")
     
-    log_file_path = "/kaggle/working/training_log.csv"
+    log_file_path = "/kaggle/working/training_v2_log.csv"
     with open(log_file_path, "w") as lf:
         lf.write("epoch,train_loss,train_iou,val_loss,val_iou,val_dice,active_prediction_pixels\n")
         
@@ -571,11 +579,13 @@ def train_and_evaluate():
         epoch_train_loss = train_loss / len(train_loader)
         epoch_train_iou = np.mean(train_ious)
         
-        # Validation Loop
+        # Validation Loop (with Global Metric Pooling)
         model.eval()
         val_loss = 0.0
-        val_ious = []
-        val_dices = []
+        total_intersection = 0.0
+        total_union = 0.0
+        total_preds_sum = 0.0
+        total_targets_sum = 0.0
         total_active_pixels = 0
         
         with torch.no_grad():
@@ -587,21 +597,31 @@ def train_and_evaluate():
                     loss = criterion(outputs, masks)
                     
                 val_loss += loss.item()
-                iou, dice = calculate_metrics(outputs, masks)
-                val_ious.append(iou)
-                val_dices.append(dice)
                 
-                # Active pixel prediction count check
                 probs = torch.sigmoid(outputs)
                 preds = (probs > 0.5).float()
+                
+                preds_flat = preds.view(-1)
+                targets_flat = masks.view(-1)
+                
+                intersection = (preds_flat * targets_flat).sum().item()
+                union = preds_flat.sum().item() + targets_flat.sum().item() - intersection
+                
+                total_intersection += intersection
+                total_union += union
+                total_preds_sum += preds_flat.sum().item()
+                total_targets_sum += targets_flat.sum().item()
                 total_active_pixels += preds.sum().item()
                 
         epoch_val_loss = val_loss / len(val_loader)
-        epoch_val_iou = np.mean(val_ious)
-        epoch_val_dice = np.mean(val_dices)
+        epoch_val_iou = (total_intersection + 1e-5) / (total_union + 1e-5)
+        epoch_val_dice = (2.0 * total_intersection + 1e-5) / (total_preds_sum + total_targets_sum + 1e-5)
         elapsed = time.time() - start_time
         
-        print(f"Epoch {epoch:02d}/{EPOCHS:02d} | Time: {elapsed:.1f}s")
+        # Advance learning rate scheduler
+        scheduler.step()
+        
+        print(f"Epoch {epoch:02d}/{EPOCHS:02d} | Time: {elapsed:.1f}s | LR: {scheduler.get_last_lr()[0]:.2e}")
         print(f"  Train Loss: {epoch_train_loss:.4f} | Train IoU: {epoch_train_iou:.4f}")
         print(f"  Val Loss:   {epoch_val_loss:.4f} | Val IoU:   {epoch_val_iou:.4f} | Val Dice: {epoch_val_dice:.4f}")
         print(f"  Active Pixels predicted: {total_active_pixels:.0f}")
@@ -618,12 +638,12 @@ def train_and_evaluate():
         # Save best model
         if epoch_val_iou > best_val_iou:
             best_val_iou = epoch_val_iou
-            torch.save(model.state_dict(), "/kaggle/working/model_real_best.pt")
-            print("  [+] Saved new best model checkpoint: model_real_best.pt")
+            torch.save(model.state_dict(), "/kaggle/working/model_real_v2_best.pt")
+            print("  [+] Saved new best model checkpoint: model_real_v2_best.pt")
             
         # Save periodic checkpoints (for resume safety)
         if epoch % 5 == 0:
-            chk_path = f"/kaggle/working/model_real_epoch_{epoch}.pt"
+            chk_path = f"/kaggle/working/model_real_v2_epoch_{epoch}.pt"
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -633,8 +653,8 @@ def train_and_evaluate():
             print(f"  [+] Periodic backup saved: {os.path.basename(chk_path)}")
             
     # Save final model
-    torch.save(model.state_dict(), "/kaggle/working/model_real_final.pt")
-    print("\n[+] Training complete. Saved final model: model_real_final.pt")
+    torch.save(model.state_dict(), "/kaggle/working/model_real_v2_final.pt")
+    print("\n[+] Training complete. Saved final model: model_real_v2_final.pt")
 
 if __name__ == "__main__":
     check_part2_discrepancy()

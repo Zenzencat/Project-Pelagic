@@ -165,7 +165,7 @@ def get_dataloaders(data_dir, patch_size=256, stride=128, batch_size=8, train_sp
     
     return train_loader, val_loader, test_loader
 
-def get_real_dataloaders(raw_dir, patch_size=256, stride=128, batch_size=8, train_ratio=0.8, seed=42, limit_files=None):
+def get_real_dataloaders(raw_dir, patch_size=256, stride=128, batch_size=8, train_ratio=0.8, seed=42, limit_files=None, allow_verification_fallback=False):
     """
     Finds and loads the real 3-part dataset files (Trujillo-Acatitla et al.) 
     for Parts I and II. Combines them for train/val split.
@@ -176,13 +176,16 @@ def get_real_dataloaders(raw_dir, patch_size=256, stride=128, batch_size=8, trai
     """
     import glob
     
+    # "category_key" must match the tokens extract_patches_balanced() in
+    # src/data/preprocess.py switches on ("oil" / "lookalike" / anything else -> no_oil rate).
     categories = [
-        {"name": "Oil Spill", "mask_subdir": "Mask_oil", "img_subdirs": ["01_Train_Val_Oil_Spill_images", "Train_Val_Oil_Spill_images"]},
-        {"name": "No Oil", "mask_subdir": "Mask_no_oil", "img_subdirs": ["01_Train_Val_No_Oil_Images", "Train_Val_No_Oil_images", "01_Train_Val_No_Oil_images"]},
-        {"name": "Lookalike", "mask_subdir": "Mask_lookalike", "img_subdirs": ["01_Train_Val_Lookalike_images", "Train_Val_Lookalike_images"]}
+        {"name": "Oil Spill", "category_key": "oil", "mask_subdir": "Mask_oil", "img_subdirs": ["01_Train_Val_Oil_Spill_images", "Train_Val_Oil_Spill_images"]},
+        {"name": "No Oil", "category_key": "no_oil", "mask_subdir": "Mask_no_oil", "img_subdirs": ["01_Train_Val_No_Oil_Images", "Train_Val_No_Oil_images", "01_Train_Val_No_Oil_images"]},
+        {"name": "Lookalike", "category_key": "lookalike", "mask_subdir": "Mask_lookalike", "img_subdirs": ["01_Train_Val_Lookalike_images", "Train_Val_Lookalike_images"]}
     ]
     
     all_pairs = []
+    missing = []
     
     # Scan through categories
     for cat in categories:
@@ -211,14 +214,34 @@ def get_real_dataloaders(raw_dir, patch_size=256, stride=128, batch_size=8, trai
                 if os.path.exists(test_img_path):
                     img_path = test_img_path
             
+            if img_path is None:
+                missing.append(filename)
+            
             all_pairs.append({
                 "category": cat["name"],
+                "category_key": cat["category_key"],
                 "mask_path": mask_path,
                 "img_path": img_path # None if image not downloaded yet
             })
             
     if not all_pairs:
         raise FileNotFoundError(f"No mask files found in any category subfolder under {raw_dir}")
+
+    # Check for missing image files
+    if missing:
+        if not allow_verification_fallback:
+            raise RuntimeError(
+                f"[!] Missing Image Files: {len(missing)} out of {len(all_pairs)} total pairs do not have "
+                "matching real SAR GeoTIFF images. Since real SAR GeoTIFFs are not downloaded locally, "
+                "running at this time will fallback to synthetic data. Refusing to start a real training "
+                "run against synthetic fallback data. To explicitly run in verification mode with synthetic "
+                "data, pass allow_verification_fallback=True."
+            )
+        else:
+            print("\n" + "="*80)
+            print(f"[!] WARNING: {len(missing)} of the total {len(all_pairs)} pairs are using synthetic fallback images.")
+            print("    This is verification mode, NOT real training data.")
+            print("="*80 + "\n")
         
     print(f"[*] Total real dataset pairs mapped: {len(all_pairs)}")
     
@@ -262,8 +285,12 @@ def get_real_dataloaders(raw_dir, patch_size=256, stride=128, batch_size=8, trai
                 image_raw[mask_raw > 0] = np.random.normal(0.02, 0.01, (np.sum(mask_raw > 0), 2))
                 image_raw = np.clip(image_raw, 0.0, 1.0)
                 
-            # Preprocess and extract 256x256 patches
-            img_p, mask_p = run_full_preprocessing(image_raw, mask_raw, patch_size, stride)
+            # Preprocess and extract 256x256 patches. Category-balanced downsampling
+            # (matching the real Kaggle training run) only applies to genuine imagery —
+            # verification-mode dummy scenes keep every patch so a small limit_files
+            # run can't accidentally end up with an empty split.
+            category = pair["category_key"] if pair["img_path"] is not None else None
+            img_p, mask_p = run_full_preprocessing(image_raw, mask_raw, patch_size, stride, category=category)
             img_patches_all.extend(img_p)
             mask_patches_all.extend(mask_p)
             

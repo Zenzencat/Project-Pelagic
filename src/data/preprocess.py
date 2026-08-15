@@ -7,6 +7,7 @@ including calibration, speckle filtering, decibel scaling, min-max
 normalization, and patch extraction grid slicing.
 """
 
+import random
 import numpy as np
 import cv2
 
@@ -94,30 +95,76 @@ def extract_patches(image, mask, patch_size=256, stride=128):
                 
     return image_patches, mask_patches
 
-def run_full_preprocessing(image_raw, mask_raw=None, patch_size=256, stride=128):
+def extract_patches_balanced(image, mask, patch_size=256, stride=128, category="oil"):
+    """
+    Extracts patches like extract_patches(), but keeps 100% of patches containing
+    slick pixels and downsamples background-only patches at a category-dependent
+    rate, matching the memory-safe sampling used for the actual Kaggle training run:
+      - oil:       1.0% of background patches kept (prob = 0.01)
+      - lookalike: 0.5% of background patches kept (prob = 0.005) -> oversampled ~2.5x vs no_oil
+      - no_oil:    0.2% of background patches kept (prob = 0.002)
+
+    kaggle_kernel/train_kaggle.py keeps its own copy of this (Kaggle kernels must
+    be self-contained single files) — see the sync warning there. If you change
+    the rates here, mirror the change in that file too.
+    """
+    H, W = image.shape[:2]
+    image_patches = []
+    mask_patches = []
+
+    for y in range(0, H - patch_size + 1, stride):
+        for x in range(0, W - patch_size + 1, stride):
+            img_patch = image[y:y+patch_size, x:x+patch_size]
+            mask_patch = mask[y:y+patch_size, x:x+patch_size]
+
+            if np.mean(img_patch) > 1e-4:
+                has_slick = np.any(mask_patch > 0)
+                if has_slick:
+                    image_patches.append(img_patch.copy())
+                    mask_patches.append(mask_patch.copy())
+                else:
+                    if category == "oil":
+                        prob = 0.01
+                    elif category == "lookalike":
+                        prob = 0.005
+                    else:
+                        prob = 0.002
+                    if random.random() < prob:
+                        image_patches.append(img_patch.copy())
+                        mask_patches.append(mask_patch.copy())
+
+    return image_patches, mask_patches
+
+def run_full_preprocessing(image_raw, mask_raw=None, patch_size=256, stride=128, category=None):
     """
     Runs the full pipeline sequence: calibration -> filtering -> dB scale -> normalize -> extract patches.
     Handles already-decibel (dB) Sentinel-1 imagery by converting to linear for speckle filtering,
     re-scaling back to dB, and normalizing.
+
+    If `category` is given ("oil" / "lookalike" / "no_oil"), background patches are
+    downsampled via extract_patches_balanced() instead of extract_patches() keeping
+    every patch, matching the class-balanced sampling used for the real training run.
     """
     if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
         image_raw = image_raw.transpose(1, 2, 0)
-        
+
     # 1. Convert already-dB input back to linear space for speckle filtering
     linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
-    
+
     # 2. Apply speckle filter in linear space
     filtered = speckle_filter(linear, window_size=5)
-    
+
     # 3. Convert back to decibels
     db = 10.0 * np.log10(np.clip(filtered, 1e-5, None))
-    
+
     # 4. Normalize to [0.0, 1.0] range
     min_db, max_db = -25.0, 0.0
     norm = (np.clip(db, min_db, max_db) - min_db) / (max_db - min_db)
-    
+
     # 5. Patch Extraction
     if mask_raw is not None:
+        if category is not None:
+            return extract_patches_balanced(norm, mask_raw, patch_size, stride, category)
         return extract_patches(norm, mask_raw, patch_size, stride)
     else:
         # For prediction, we might only need the image patches
