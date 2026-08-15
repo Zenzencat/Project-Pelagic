@@ -1,0 +1,31 @@
+scene_id,category,center_lat,center_lon,region,v1_outcome,v2_outcome,v2_pass_fail,v2_iou,v2_fp_area_km2
+lookalike_00000,lookalike,18.7616,38.2182,Red Sea,false_positive,false_positive,FAIL,0.0,185.33628
+lookalike_00001,lookalike,29.4344,-89.1936,Gulf of Mexico,false_positive,false_positive,FAIL,0.0,282.48544
+lookalike_00002,lookalike,29.2607,-89.1936,Gulf of Mexico,false_positive,false_positive,FAIL,0.0,86.68289
+lookalike_00003,lookalike,35.8761,34.7851,Eastern Mediterranean,false_positive,false_positive,FAIL,0.0,0.08135
+lookalike_00004,lookalike,60.0498,20.7942,Baltic Sea,false_positive,false_positive,FAIL,0.0,3.23261
+lookalike_00005,lookalike,42.783,9.7905,Western Mediterranean,false_positive,false_positive,FAIL,0.0,160.8899
+lookalike_00006,lookalike,42.6111,9.7905,Western Mediterranean,false_positive,false_positive,FAIL,0.0,213.35849
+lookalike_00007,lookalike,19.1116,38.2182,Red Sea,false_positive,false_positive,FAIL,0.0,38.63377
+lookalike_00008,lookalike,18.9366,38.2182,Red Sea,false_positive,false_positive,FAIL,0.0,188.20507
+lookalike_00009,lookalike,18.7616,38.3954,Red Sea,false_positive,false_positive,FAIL,0.0,185.70206
+no_oil_00000,no_oil,35.6988,35.5741,Eastern Mediterranean,false_positive,false_positive,FAIL,0.0,0.04816
+no_oil_00001,no_oil,35.8761,33.4973,Eastern Mediterranean,correct,false_positive,FAIL,0.0,0.00332
+no_oil_00002,no_oil,36.5597,35.5741,Eastern Mediterranean,false_positive,correct,PASS,1.0,0.0
+no_oil_00003,no_oil,36.2154,35.5741,Eastern Mediterranean,false_positive,false_positive,FAIL,0.0,0.00113
+no_oil_00004,no_oil,36.2154,36.6159,Eastern Mediterranean,correct,correct,PASS,1.0,0.0
+no_oil_00005,no_oil,34.3706,35.3241,Eastern Mediterranean,correct,correct,PASS,1.0,0.0
+no_oil_00006,no_oil,-5.0944,105.5057,Sunda Strait,correct,correct,PASS,1.0,0.0
+no_oil_00007,no_oil,-5.2772,105.5057,Sunda Strait,correct,correct,PASS,1.0,0.0
+no_oil_00008,no_oil,-5.4599,105.5057,Sunda Strait,correct,correct,PASS,1.0,0.0
+no_oil_00009,no_oil,36.5117,36.741,Eastern Mediterranean,correct,correct,PASS,1.0,0.0
+oil_00000,oil,35.5307,34.7851,Eastern Mediterranean,correct,correct,PASS,0.9553,2.80854
+oil_00001,oil,35.4087,34.9938,Eastern Mediterranean,correct,correct,PASS,0.7252,2.90091
+oil_00002,oil,20.453,38.5649,Red Sea,partial,partial,FAIL,0.2588,0.55262
+oil_00003,oil,20.1616,38.2182,Red Sea,correct,correct,PASS,0.8176,8.84249
+oil_00004,oil,35.8224,35.0308,Eastern Mediterranean,correct,correct,PASS,0.8168,5.50643
+oil_00005,oil,35.4772,35.0308,Eastern Mediterranean,correct,correct,PASS,0.964,4.24319
+oil_00006,oil,35.358,34.7851,Eastern Mediterranean,correct,correct,PASS,0.9503,3.83639
+oil_00007,oil,35.1852,34.7851,Eastern Mediterranean,correct,correct,PASS,0.8736,2.50086
+oil_00008,oil,17.5437,39.9908,Red Sea,partial,partial,FAIL,0.1732,47.55839
+oil_00009,oil,35.5816,35.1778,Eastern Mediterranean,correct,correct,PASS,0.7044,2.37856
