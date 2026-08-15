@@ -69,7 +69,7 @@ We explicitly reject overall pixel accuracy as a metric. We report:
 
 We utilize the three-part Sentinel-1 SAR Oil Spill Image Dataset by Trujillo-Acatitla et al. containing 2048x2048px dual-channel (VV, VH) images in dB scale:
 1. **Model Training & Hyperparameter Tuning**:
-   * We combine **Part I** (1,200 oil spill scenes) and **Part II** (685 clean sea and lookalike scenes) to build our training and validation datasets.
+   * We combine **Part I** (1,200 oil spill scenes) and **Part II** (1,370 clean sea and lookalike scenes: 685 of each category) to build our training and validation datasets (totaling 2,570 scenes).
    * Cross-validation splits are partitioned strictly by Scene ID to prevent spatial leakage.
 2. **Model Evaluation & Reporting**:
    * We keep **Part III** (450 scenes: 150 oil, 150 no oil, 150 lookalike) completely untouched during model training and tuning.

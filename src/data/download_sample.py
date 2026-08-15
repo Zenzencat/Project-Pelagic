@@ -7,7 +7,7 @@ Oil Spill Image Dataset by Trujillo-Acatitla et al. from Zenodo.
 
 Record mappings:
 - Part I (Oil Spills): record ID 8346860 (~40.7 GB images, 6.2 MB masks)
-- Part II (No Oil & Lookalikes): record ID 8253899 (~45.9 GB images, 843 KB masks)
+- Part II (No Oil & Lookalikes): record ID 8253899 (~45.9 GB images, 843 KB masks, 1,370 scenes total)
 - Part III (Held-Out Test Set): record ID 13761290 (~9.86 GB images & masks)
 """
 
@@ -26,7 +26,7 @@ ZENODO_RECORDS = {
     },
     2: {
         "id": 8253899,
-        "description": "Part II (Training/Validation — No Oil + Lookalike images): 685 images + masks",
+        "description": "Part II (Training/Validation — No Oil + Lookalike images): 1,370 images + masks (685 No Oil, 685 Lookalike)",
         "masks": ["01_Train_Val_No_Oil_mask.7z", "01_Train_Val_Lookalike_mask.7z"],
         "images": ["01_Train_Val_No_Oil_Images.7z", "01_Train_Val_Lookalike_images.7z"]
     },

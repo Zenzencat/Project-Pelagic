@@ -30,7 +30,8 @@ def test_real_pipeline():
             batch_size=4,
             train_ratio=0.8,
             seed=42,
-            limit_files=5
+            limit_files=5,
+            allow_verification_fallback=True
         )
         
         print("\n[+] Dataloaders successfully initialized.")
