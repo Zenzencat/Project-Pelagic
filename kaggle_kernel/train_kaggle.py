@@ -106,6 +106,13 @@ def verify_real_images():
 # -------------------------------------------------------------
 # STEP 3: PREPROCESSING & OPTIMIZED PATCH LOADING (MEMORY SAFE)
 # -------------------------------------------------------------
+# WARNING: Synced copy of src/data/preprocess.py (calibrate_to_sigma, speckle_filter,
+# to_decibels, normalize_image, extract_patches_balanced, run_full_preprocessing) and
+# src/data/dataset.py (get_real_dataloaders). Kaggle kernels must be a single
+# self-contained file, so these can't be imported directly the way the rest of this
+# codebase does — if you change the category oversampling rates, the hard-fail
+# behavior, or the dB-scale handling in either src/data/preprocess.py or
+# src/data/dataset.py, mirror the change here too, and vice versa.
 def calibrate_to_sigma(image_dn, calibration_constant=1.0):
     return (image_dn.astype(np.float32) ** 2) * calibration_constant
 
