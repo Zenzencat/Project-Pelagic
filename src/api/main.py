@@ -27,6 +27,15 @@ from src.api.database import init_db, get_db_connection
 from src.models.unet import UNet
 from src.data.preprocess import calibrate_to_sigma, speckle_filter, to_decibels, normalize_image
 from src.inference import run_tiled_inference
+from src.analysis.geoutils import get_scene_geolocation
+
+# Real Sentinel-1 GRD ground sampling distance, confirmed directly from the
+# holdout GeoTIFFs' ModelPixelScaleTag (consistent across all 30 scenes checked:
+# 8.983152841195218e-05 deg/pixel, ~10m/pixel at these latitudes). Used as the
+# fallback scale for scenes with no embedded georeferencing (synthetic
+# verification scenes) -- previously this whole module used an arbitrary
+# 0.00015 deg/pixel display-only mock constant for every scene.
+REAL_PIXEL_SCALE_DEG = 8.983152841195218e-05
 
 # 1. Initialize Database on startup
 init_db()
@@ -212,10 +221,20 @@ def predict(payload: PredictRequest):
     # 4. Contour Tracing (Convert binary mask to GeoJSON Polygon)
     contours, _ = cv2.findContours(preds, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Coordinate system mapping (Gulf of Thailand mock offsets)
-    center_lat = 9.0
-    center_lon = 100.5
-    scale = 0.00015 # scale factor degrees per pixel
+    # Coordinate system mapping: real WGS84 georeferencing embedded in the
+    # scene's GeoTIFF (all real Trujillo-Acatitla scenes carry this). Falls
+    # back to a fixed placeholder point only for scenes with no embedded
+    # georeferencing (synthetic verification scenes have no real-world
+    # location to report) -- the pixel scale itself is always the real GSD.
+    try:
+        geo = get_scene_geolocation(img_path)
+        center_lat = geo["center_lat"]
+        center_lon = geo["center_lon"]
+        scale = geo["pixel_scale_deg"]
+    except ValueError:
+        center_lat = 9.0
+        center_lon = 100.5
+        scale = REAL_PIXEL_SCALE_DEG
     H, W = preds.shape
     
     polygons = []
