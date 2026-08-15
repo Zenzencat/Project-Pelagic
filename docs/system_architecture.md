@@ -11,7 +11,7 @@ The system utilizes a lightweight, modular architecture designed for local devel
 1. **Frontend (ส่วนแสดงผลผู้ใช้งาน)**: A React-based web dashboard using Leaflet.js to display satellite footprints, detection mask overlays, and nearby AIS vessel coordinates.
 2. **Backend API (ส่วนบริการข้อมูล)**: A FastAPI service serving REST endpoints for model inference, spatial queries, and mock AIS telemetry.
 3. **Database (ระบบฐานข้อมูล)**: An SQLite database storing detection history, geo-coordinates, confidence scores, and surrounding AIS vessel telemetry.
-4. **Model Inference Layer (ส่วนประมวลผลโมเดล AI)**: A PyTorch-trained U-Net segmentation model exported to ONNX format for high-performance, CPU-friendly inference.
+4. **Model Inference Layer (ส่วนประมวลผลโมเดล AI)**: A from-scratch PyTorch U-Net segmentation model (no pretrained backbone), loaded directly via `torch.load` at API startup and run with plain PyTorch inference (CPU, or CUDA if available) — no ONNX export step exists anywhere in this codebase.
 5. **Data Storage (ส่วนจัดเก็บข้อมูล)**: Local file storage containing raw Sentinel-1 GeoTIFF scenes and output binary segmentation masks.
 
 ---
@@ -36,8 +36,8 @@ graph TD
 
   subgraph BE ["Backend Layer (ส่วนบริการข้อมูล)"]
     API["FastAPI Web API"]:::backend
-    PredictRouter["POST /predict Endpoint"]:::backend
-    HistoryRouter["GET /detections Endpoint"]:::backend
+    PredictRouter["POST /api/predict Endpoint"]:::backend
+    HistoryRouter["GET /api/detections Endpoint"]:::backend
   end
 
   subgraph DB ["Database Layer (ระบบฐานข้อมูล)"]
@@ -45,8 +45,8 @@ graph TD
   end
 
   subgraph ML ["Model Layer (โมเดลการประมวลผล)"]
-    Inference["ONNX Runtime (CPU/GPU)"]:::ml
-    ModelFile["Trained U-Net Model (ResNet Backbone)"]:::ml
+    Inference["PyTorch Inference (CPU, or CUDA if available)"]:::ml
+    ModelFile["Trained U-Net (from-scratch, no pretrained backbone)"]:::ml
   end
 
   subgraph ST ["File Storage (ส่วนจัดเก็บไฟล์)"]
@@ -78,11 +78,13 @@ graph TD
 * **AIS Overlay**: Pulls coordinates of nearby vessels from the backend to overlay AIS tracks, allowing operators to visually correlate oil slicks with vessels in the vicinity.
 
 ### 3.2 FastAPI Backend
-* **`POST /predict`**: Accepts a scene ID or coordinates, extracts the corresponding SAR patches, runs preprocessing, executes U-Net segmentation, and saves the output mask.
-* **`GET /detections`**: Queries the SQLite database to fetch historical detections with coordinates, timestamps, and confidence scores for rendering on the map.
+* **`POST /api/predict`**: Accepts a scene ID, reads the matching GeoTIFF, runs preprocessing, tiles the scene into 256x256 patches (matching the training/eval patch regime — see `src/inference.py`), runs U-Net segmentation over each tile, stitches the result, traces contours into a GeoJSON polygon, and logs the detection to SQLite.
+* **`GET /api/detections`**: Queries the SQLite database to fetch historical detections with coordinates, timestamps, and confidence scores for rendering on the map.
+* **`GET /api/detections/{id}`**: Fetches one detection's full detail, including its associated (mock) nearby AIS vessels.
+* **`GET /health`**: Reports API and model-load status.
 
-### 3.3 U-Net ONNX Inference Engine
-* **ONNX Runtime**: Running inference using ONNX format ensures the backend API remains decoupled from heavy training-centric libraries like PyTorch, optimizing deployment size and inference speed on target devices.
+### 3.3 U-Net Inference Engine
+* **Plain PyTorch**: Inference runs directly against the trained `.pt` checkpoint via `torch.load` / `model.eval()` — there is no ONNX export step. The model is a from-scratch 4-level U-Net (`DoubleConv` blocks, no pretrained backbone), loaded once at API startup and reused across requests.
 
 ### 3.4 SQLite Database
 * Stores structured metadata rather than raw spatial polygons to avoid the configuration complexity of PostGIS during early academic presentation. Features, coordinates, and bounding boxes are stored as standardized GeoJSON strings.
