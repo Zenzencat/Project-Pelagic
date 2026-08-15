@@ -25,6 +25,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".
 from src.api.database import init_db, get_db_connection
 from src.models.unet import UNet
 from src.data.preprocess import calibrate_to_sigma, speckle_filter, to_decibels, normalize_image
+from src.inference import run_tiled_inference
 
 # 1. Initialize Database on startup
 init_db()
@@ -197,13 +198,12 @@ def predict(payload: PredictRequest):
         norm = normalize_image(db)
     
     # 3. U-Net Inference
-    # Model takes [B, C, H, W] -> [1, 2, H, W]
-    tensor = torch.from_numpy(norm.transpose(2, 0, 1)).unsqueeze(0).float().to(device)
-    
-    with torch.no_grad():
-        logits = model(tensor)
-        probs = torch.sigmoid(logits).squeeze(0).squeeze(0).cpu().numpy() # shape (H, W)
-        preds = (probs > 0.5).astype(np.uint8) * 255
+    # Tiled to match the 256x256 patch regime the model was trained/evaluated on
+    # (see src/inference.py and src/evaluate_holdout.py) rather than a single
+    # whole-image forward pass, which puts every interior pixel in a receptive-field
+    # context the model never saw during training.
+    probs, preds_bin = run_tiled_inference(model, norm, device)
+    preds = preds_bin * 255
         
     # 4. Contour Tracing (Convert binary mask to GeoJSON Polygon)
     contours, _ = cv2.findContours(preds, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -267,7 +267,7 @@ def predict(payload: PredictRequest):
     # Write to Database
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     try:
         cursor.execute("""
         INSERT INTO detections (scene_id, confidence_score, bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon, geojson_mask, image_path)
@@ -280,7 +280,7 @@ def predict(payload: PredictRequest):
             f"data/processed/{mask_png_name}"
         ))
         det_id = cursor.lastrowid
-        
+
         # Add mock AIS vessels for the newly processed scene
         cursor.executemany("""
         INSERT INTO nearby_vessels (detection_id, mmsi, vessel_name, latitude, longitude, timestamp, distance_meters)
@@ -290,7 +290,7 @@ def predict(payload: PredictRequest):
             (det_id, 567409210, "Nakhon Fishery 21", center_lat - 0.03, center_lon + 0.01, 5100.0)
         ])
         conn.commit()
-        
+
     except sqlite3.IntegrityError:
         # Scene already processed, fetch its ID
         cursor.execute("SELECT id FROM detections WHERE scene_id = ?;", (scene_id,))
