@@ -9,6 +9,7 @@ venv/
 # Ignore raw downloads and processed outputs
 data/raw/
 data/processed/
+data/holdout/
 # Note: data/synthetic/ and data/pelagic.db are tracked
 
 # Frontend
@@ -25,6 +26,7 @@ Thumbs.db
 
 # Large checkpoints & temp Kaggle folders
 checkpoints/model_real_final.pt
+checkpoints/model_real_v2_final.pt
 kaggle_model_dataset/
 kaggle_output/
 kaggle_eval_output/
