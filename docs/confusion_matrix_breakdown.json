@@ -1,0 +1,56 @@
+[
+  {
+    "checkpoint": "v1",
+    "category": "oil",
+    "n_scenes": 10,
+    "correct": 8,
+    "partial": 2,
+    "false_positive": 0,
+    "false_negative": 0
+  },
+  {
+    "checkpoint": "v1",
+    "category": "no_oil",
+    "n_scenes": 10,
+    "correct": 7,
+    "partial": 0,
+    "false_positive": 3,
+    "false_negative": 0
+  },
+  {
+    "checkpoint": "v1",
+    "category": "lookalike",
+    "n_scenes": 10,
+    "correct": 0,
+    "partial": 0,
+    "false_positive": 10,
+    "false_negative": 0
+  },
+  {
+    "checkpoint": "v2",
+    "category": "oil",
+    "n_scenes": 10,
+    "correct": 8,
+    "partial": 2,
+    "false_positive": 0,
+    "false_negative": 0
+  },
+  {
+    "checkpoint": "v2",
+    "category": "no_oil",
+    "n_scenes": 10,
+    "correct": 7,
+    "partial": 0,
+    "false_positive": 3,
+    "false_negative": 0
+  },
+  {
+    "checkpoint": "v2",
+    "category": "lookalike",
+    "n_scenes": 10,
+    "correct": 0,
+    "partial": 0,
+    "false_positive": 10,
+    "false_negative": 0
+  }
+]

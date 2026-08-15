@@ -1,0 +1,107 @@
+[
+  {
+    "metric": "oil_iou",
+    "v1_value": 0.7263,
+    "v2_value": 0.7239,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_dice",
+    "v1_value": 0.8044,
+    "v2_value": 0.8039,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_pixels",
+    "v1_value": 99575.4,
+    "v2_value": 89587.6,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_pct_of_scene",
+    "v1_value": 2.374,
+    "v2_value": 2.136,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_area_UNVERIFIED",
+    "v1_value": 27.6,
+    "v2_value": 24.84,
+    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_iou",
+    "v1_value": 0.7,
+    "v2_value": 0.7,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_dice",
+    "v1_value": 0.7,
+    "v2_value": 0.7,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_pixels",
+    "v1_value": 300.4,
+    "v2_value": 64.8,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_pct_of_scene",
+    "v1_value": 0.007,
+    "v2_value": 0.002,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_area_UNVERIFIED",
+    "v1_value": 0.08,
+    "v2_value": 0.02,
+    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_iou",
+    "v1_value": 0.0,
+    "v2_value": 0.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_dice",
+    "v1_value": 0.0,
+    "v2_value": 0.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_pixels",
+    "v1_value": 1733578.4,
+    "v2_value": 1571115.3,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_pct_of_scene",
+    "v1_value": 41.332,
+    "v2_value": 37.458,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_area_UNVERIFIED",
+    "v1_value": 480.59,
+    "v2_value": 435.55,
+    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "n_scenes": 10
+  }
+]

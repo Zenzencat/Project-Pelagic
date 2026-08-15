@@ -1,0 +1,7 @@
+checkpoint,category,n_scenes,correct,partial,false_positive,false_negative
+v1,oil,10,8,2,0,0
+v1,no_oil,10,7,0,3,0
+v1,lookalike,10,0,0,10,0
+v2,oil,10,8,2,0,0
+v2,no_oil,10,7,0,3,0
+v2,lookalike,10,0,0,10,0
