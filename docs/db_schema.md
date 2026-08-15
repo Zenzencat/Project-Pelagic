@@ -30,6 +30,7 @@ erDiagram
     real bbox_max_lon
     text geojson_mask
     text image_path
+    text checkpoint_hash
   }
 
   NEARBY_VESSELS {
@@ -61,7 +62,12 @@ CREATE TABLE detections (
     bbox_max_lat REAL NOT NULL,             -- Bounding box Max Latitude
     bbox_max_lon REAL NOT NULL,             -- Bounding box Max Longitude
     geojson_mask TEXT NOT NULL,             -- GeoJSON geometry of the detected slick polygon
-    image_path TEXT NOT NULL                -- Local file path to the output overlay mask (.png)
+    image_path TEXT NOT NULL,               -- Local file path to the output overlay mask (.png)
+    checkpoint_hash TEXT                    -- First 12 hex chars of the checkpoint file's MD5.
+                                             -- Lets /api/predict tell a genuine cache hit (same
+                                             -- scene_id, same checkpoint) apart from a stale row
+                                             -- left by a since-swapped checkpoint, and refresh it
+                                             -- in place instead of silently returning old results.
 );
 
 -- Table: nearby_vessels

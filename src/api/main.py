@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import sqlite3
+import hashlib
 import numpy as np
 import cv2
 import tifffile
@@ -48,10 +49,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = None
 model_loaded = False
+CHECKPOINT_HASH = None
 
 print("[*] Checking U-Net model checkpoint...")
 if os.path.exists(CHECKPOINT_PATH):
     try:
+        with open(CHECKPOINT_PATH, "rb") as f:
+            CHECKPOINT_HASH = hashlib.md5(f.read()).hexdigest()[:12]
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=device)
         model = UNet(in_channels=2, out_channels=1)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
@@ -268,33 +272,59 @@ def predict(payload: PredictRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    mock_vessels = [
+        (351980000, "Petro Express", center_lat + 0.02, center_lon - 0.03, 4200.0),
+        (567409210, "Nakhon Fishery 21", center_lat - 0.03, center_lon + 0.01, 5100.0)
+    ]
+
+    def insert_vessels(det_id):
+        cursor.executemany("""
+        INSERT INTO nearby_vessels (detection_id, mmsi, vessel_name, latitude, longitude, timestamp, distance_meters)
+        VALUES (?, ?, ?, ?, ?, datetime('now'), ?);
+        """, [(det_id, mmsi, name, lat, lon, dist) for mmsi, name, lat, lon, dist in mock_vessels])
+
     try:
         cursor.execute("""
-        INSERT INTO detections (scene_id, confidence_score, bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon, geojson_mask, image_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO detections (scene_id, confidence_score, bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon, geojson_mask, image_path, checkpoint_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             scene_id,
             confidence_score,
             bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon,
             json.dumps(geojson),
-            f"data/processed/{mask_png_name}"
+            f"data/processed/{mask_png_name}",
+            CHECKPOINT_HASH
         ))
         det_id = cursor.lastrowid
-
-        # Add mock AIS vessels for the newly processed scene
-        cursor.executemany("""
-        INSERT INTO nearby_vessels (detection_id, mmsi, vessel_name, latitude, longitude, timestamp, distance_meters)
-        VALUES (?, ?, ?, ?, ?, datetime('now'), ?);
-        """, [
-            (det_id, 351980000, "Petro Express", center_lat + 0.02, center_lon - 0.03, 4200.0),
-            (det_id, 567409210, "Nakhon Fishery 21", center_lat - 0.03, center_lon + 0.01, 5100.0)
-        ])
+        insert_vessels(det_id)
         conn.commit()
 
     except sqlite3.IntegrityError:
-        # Scene already processed, fetch its ID
-        cursor.execute("SELECT id FROM detections WHERE scene_id = ?;", (scene_id,))
-        det_id = cursor.fetchone()["id"]
+        # scene_id already has a row (UNIQUE constraint). Only treat it as a
+        # valid cache hit if it was produced by the checkpoint currently loaded —
+        # otherwise this is stale data left by a since-swapped checkpoint, and
+        # silently returning it would misreport a re-analysis as unchanged.
+        cursor.execute("SELECT id, checkpoint_hash FROM detections WHERE scene_id = ?;", (scene_id,))
+        existing = cursor.fetchone()
+        det_id = existing["id"]
+
+        if existing["checkpoint_hash"] != CHECKPOINT_HASH:
+            cursor.execute("""
+            UPDATE detections SET
+                confidence_score = ?, bbox_min_lat = ?, bbox_min_lon = ?, bbox_max_lat = ?, bbox_max_lon = ?,
+                geojson_mask = ?, image_path = ?, checkpoint_hash = ?, detected_at = CURRENT_TIMESTAMP
+            WHERE id = ?;
+            """, (
+                confidence_score,
+                bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon,
+                json.dumps(geojson),
+                f"data/processed/{mask_png_name}",
+                CHECKPOINT_HASH,
+                det_id
+            ))
+            cursor.execute("DELETE FROM nearby_vessels WHERE detection_id = ?;", (det_id,))
+            insert_vessels(det_id)
+            conn.commit()
     finally:
         conn.close()
         

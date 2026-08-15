@@ -60,8 +60,16 @@ def init_db():
     # Create indices
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_detections_scene ON detections(scene_id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_vessels_detection ON nearby_vessels(detection_id);")
-    
+
     conn.commit()
+
+    # Migration: add checkpoint_hash so predict() can tell a genuinely-cached
+    # result apart from a stale one left by a since-swapped checkpoint.
+    cursor.execute("PRAGMA table_info(detections);")
+    existing_cols = [row[1] for row in cursor.fetchall()]
+    if "checkpoint_hash" not in existing_cols:
+        cursor.execute("ALTER TABLE detections ADD COLUMN checkpoint_hash TEXT;")
+        conn.commit()
     
     # 3. Seed mock data if empty
     cursor.execute("SELECT COUNT(*) FROM detections;")
