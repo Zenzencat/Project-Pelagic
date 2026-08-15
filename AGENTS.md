@@ -1,0 +1,82 @@
+# AGENTS.md — Context for AI Models Working in This Repo
+
+This file orients any AI coding assistant (Claude, GPT, Gemini, etc.) picking up
+this repo cold. It is a map, not the source of truth — **`docs/status.md` is
+the authoritative, up-to-date account of what's resolved, what's broken, and
+what's blocked.** Read that file before making claims about project state.
+
+## What this project is
+
+Project Pelagic (SWU Prasarnmit, AI Engineering Track final project) is a
+proof-of-concept SAR maritime oil-slick detector: Sentinel-1 C-band radar
+imagery (VV/VH) → U-Net semantic segmentation → detected slick polygons +
+nearby AIS vessels rendered on a Leaflet map dashboard.
+
+- **Backend**: FastAPI (`src/api/main.py`), SQLite (`data/pelagic.db`)
+- **Model**: U-Net (`src/models/unet.py`), PyTorch, trained on Kaggle (T4 GPU)
+- **Frontend**: Vite + React + Leaflet (`frontend/`)
+- **Training data**: 3-part Sentinel-1 SAR Oil Spill Dataset (Trujillo-Acatitla
+  et al.), Zenodo record IDs `8346860` / `8253899` / `13761290`
+
+## Where to look first
+
+| Question | File |
+|---|---|
+| "What's currently broken / open / blocked?" | [`docs/status.md`](docs/status.md) — rewritten in full during a session-5 health check specifically because earlier versions had drifted from reality. Trust this over any other doc's framing. |
+| "How do I run this locally?" | [`README.md`](README.md) — Quick Start Guide section |
+| "What's the model architecture / training recipe?" | [`docs/ai_technique.md`](docs/ai_technique.md), `kaggle_kernel/train_kaggle.py` |
+| "What's the system architecture?" | [`docs/system_architecture.md`](docs/system_architecture.md) |
+| "What's the DB schema?" | [`docs/db_schema.md`](docs/db_schema.md) |
+| "What are the eval numbers?" | `docs/checkpoint_comparison_summary.{json,csv}`, `docs/holdout_per_scene_results.{json,csv}`, `docs/confusion_matrix_breakdown.{json,csv}`, `docs/region_coverage.{json,csv}` |
+
+## Known trap: README vs. status.md disagree on one number
+
+README's "Lookalike False Alarm Suppression Analysis" section frames the v1→v2
+improvement as a "10% to 45%" per-scene pixel reduction. `docs/status.md`
+(session 5, more recent and more carefully verified) corrects this: the
+*average* false-positive area dropped from 41.3% to 37.5% of scene area —
+real, but more modest than the README's framing implies. The 10-45% range in
+the README describes spread across individual scenes, not the typical
+improvement. **Prefer status.md's framing** if asked about this metric, and
+flag the discrepancy rather than silently repeating either figure.
+
+## Structural notes worth knowing before editing
+
+- **`src/data/preprocess.py::run_full_preprocessing()` has a known, unfixed
+  bug**: it doesn't branch on dB vs. linear-scale input the way
+  `src/api/main.py`'s `/api/predict` does. Feeding synthetic (linear-scale)
+  data through it silently produces a saturated `[1.0, 1.0]` patch — no
+  information content, but no error either. This affects `verify_pipeline.py`,
+  `src/verify_training.py`, and `verify_real_pipeline.py`'s fallback mode,
+  which all currently report false "success." See status.md Open Issue #1.
+- **`kaggle_kernel/train_kaggle.py` cannot import `src/data/`** (Kaggle
+  kernels must be single-file), so its patch-sampling logic is a manual
+  duplicate of `src/data/dataset.py` / `preprocess.py`. Both files carry an
+  explicit cross-reference banner — if you change sampling rates or hard-fail
+  behavior in one, mirror it in the other or they will drift.
+- **`frontend/src/App.jsx`'s slick-size badge ("ขนาดคราบ") is hardcoded fake
+  data** (`8.5`/`14.5` km²) for every detection — not wired to the real
+  geojson-derived area. Known, flagged, not yet fixed.
+- **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
+  `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
+  trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
+  artifacts — don't assume they're interchangeable.
+- **Lookalike detection is the unsolved core problem**: SAR backscatter
+  reduction from lookalikes (wind shadows, biogenic films) is
+  indistinguishable from real oil at the pixel level. Both checkpoints score
+  `0.0000` IoU/Dice on all 10 lookalike holdout scenes — v2's oversampling
+  reduces false-positive area but doesn't come close to solving it. Two
+  investigations toward fixing this (ERA5 wind cross-check + multi-temporal
+  SAR comparison; SAR-optical fusion via DSen2-CR) are scoped/built but
+  blocked on a real external gap: **this dataset has no acquisition
+  timestamps anywhere**, confirmed against the Zenodo deposits directly.
+  See status.md for full detail — don't re-investigate this from scratch.
+
+## Conventions
+
+- Session handoffs go in `docs/status.md`, rewritten in full (not
+  incrementally patched) whenever drift between it and reality is found —
+  keep doing that rather than appending an ever-growing changelog.
+- Claims in these docs are generally backed by an actual verification step
+  (a real test run, a real API check, reading actual source instead of a
+  README) rather than assumption — match that bar when adding new claims.
