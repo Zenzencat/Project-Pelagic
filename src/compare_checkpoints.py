@@ -37,10 +37,23 @@ sys.path.append(os.path.abspath("."))
 from src.models.unet import UNet
 from src.data.preprocess import speckle_filter, normalize_image
 from src.inference import run_tiled_inference
+from src.analysis.geoutils import get_scene_geolocation
 
-# Matches the pixel->degree scale used for GeoJSON footprints in src/api/main.py
-# (0.00015 deg/pixel), converted to km using ~111 km/degree at the equator.
-PIXEL_AREA_KM2 = (0.00015 * 111.0) ** 2
+KM_PER_DEG_LAT = 111.32
+
+
+def pixel_area_km2(center_lat_deg, pixel_scale_deg):
+    """
+    Real ground area per pixel, using the scene's own embedded GeoTIFF pixel
+    scale (not a mock display constant) and correcting for the fact that a
+    degree of longitude is shorter than a degree of latitude away from the
+    equator (factor cos(latitude)). This matters here specifically: the 30
+    holdout scenes span roughly -5 to 60 degrees latitude (Sunda Strait to the
+    Baltic), where that correction is a ~2x effect, not a rounding error.
+    """
+    import math
+    km_per_deg_lon = KM_PER_DEG_LAT * math.cos(math.radians(center_lat_deg))
+    return (pixel_scale_deg * KM_PER_DEG_LAT) * (pixel_scale_deg * km_per_deg_lon)
 
 CHECKPOINTS = {"v1": "model_real_best.pt", "v2": "model_real_v2_best.pt"}
 CATEGORIES = ["oil", "no_oil", "lookalike"]
@@ -105,7 +118,12 @@ def main():
         target = (mask_raw > 0).astype(np.uint8)
         norm = preprocess(image_raw)
 
-        row = {"scene_id": scene_id, "category": cat, "gt_positive_px": int(target.sum())}
+        geo = get_scene_geolocation(img_path)
+        px_area_km2 = pixel_area_km2(geo["center_lat"], geo["pixel_scale_deg"])
+
+        row = {"scene_id": scene_id, "category": cat, "gt_positive_px": int(target.sum()),
+               "center_lat": geo["center_lat"], "center_lon": geo["center_lon"],
+               "pixel_area_km2_at_scene_latitude": round(px_area_km2, 8)}
 
         for v, model in models.items():
             t0 = time.time()
@@ -131,7 +149,7 @@ def main():
             row[f"{v}_pred_positive_px"] = tp + fp
             row[f"{v}_iou"] = round(iou, 4)
             row[f"{v}_dice"] = round(dice, 4)
-            row[f"{v}_fp_area_km2"] = round(fp * PIXEL_AREA_KM2, 4)
+            row[f"{v}_fp_area_km2"] = round(fp * px_area_km2, 5)
             row[f"{v}_outcome"] = outcome
 
             print(f"  [{idx+1}/{len(img_paths)}] {scene_id:16s} [{v}] iou={iou:.3f} fp_px={fp:>9d} "
@@ -176,14 +194,16 @@ def main():
                 "n_scenes": len(cat_rows)
             })
 
-        # Raw-pixel false-positive area — the non-binary-floored view.
+        # Raw-pixel false-positive area — the non-binary-floored view. Uses each
+        # scene's own real, latitude-corrected pixel area (pixel_area_km2()
+        # above) — no longer the old 0.00015 deg/pixel demo-display mock.
         v1_fp_area_avg = float(np.mean([r["v1_fp_area_km2"] for r in cat_rows]))
         v2_fp_area_avg = float(np.mean([r["v2_fp_area_km2"] for r in cat_rows]))
         summary_rows.append({
-            "metric": f"{cat}_avg_false_positive_area",
-            "v1_value": round(v1_fp_area_avg, 4),
-            "v2_value": round(v2_fp_area_avg, 4),
-            "unit": "km2_per_scene",
+            "metric": f"{cat}_avg_false_positive_area_km2",
+            "v1_value": round(v1_fp_area_avg, 3),
+            "v2_value": round(v2_fp_area_avg, 3),
+            "unit": "km2_per_scene (real GSD, latitude-corrected)",
             "n_scenes": len(cat_rows)
         })
 
@@ -193,7 +213,18 @@ def main():
             "metric": f"{cat}_avg_false_positive_pixels",
             "v1_value": round(v1_fp_px_avg, 1),
             "v2_value": round(v2_fp_px_avg, 1),
-            "unit": "pixels_per_scene",
+            "unit": "pixels_per_scene (scene = 2048x2048px)",
+            "n_scenes": len(cat_rows)
+        })
+
+        scene_total_px = 2048 * 2048
+        v1_pct = float(np.mean([r["v1_fp_px"] / scene_total_px * 100 for r in cat_rows]))
+        v2_pct = float(np.mean([r["v2_fp_px"] / scene_total_px * 100 for r in cat_rows]))
+        summary_rows.append({
+            "metric": f"{cat}_avg_false_positive_pct_of_scene",
+            "v1_value": round(v1_pct, 3),
+            "v2_value": round(v2_pct, 3),
+            "unit": "percent_of_scene_area",
             "n_scenes": len(cat_rows)
         })
 

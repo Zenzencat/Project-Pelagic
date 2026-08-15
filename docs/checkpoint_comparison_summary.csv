@@ -3,14 +3,14 @@ oil_iou,0.7263,0.7239,ratio,10
 oil_dice,0.8044,0.8039,ratio,10
 oil_avg_false_positive_pixels,99575.4,89587.6,pixels_per_scene (scene = 2048x2048px),10
 oil_avg_false_positive_pct_of_scene,2.374,2.136,percent_of_scene_area,10
-oil_avg_false_positive_area_UNVERIFIED,27.6,24.84,"km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",10
+oil_avg_false_positive_area_km2,8.948,8.113,"km2_per_scene (real GSD, latitude-corrected)",10
 no_oil_iou,0.7,0.7,ratio,10
 no_oil_dice,0.7,0.7,ratio,10
 no_oil_avg_false_positive_pixels,300.4,64.8,pixels_per_scene (scene = 2048x2048px),10
 no_oil_avg_false_positive_pct_of_scene,0.007,0.002,percent_of_scene_area,10
-no_oil_avg_false_positive_area_UNVERIFIED,0.08,0.02,"km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",10
+no_oil_avg_false_positive_area_km2,0.024,0.005,"km2_per_scene (real GSD, latitude-corrected)",10
 lookalike_iou,0.0,0.0,ratio,10
 lookalike_dice,0.0,0.0,ratio,10
 lookalike_avg_false_positive_pixels,1733578.4,1571115.3,pixels_per_scene (scene = 2048x2048px),10
 lookalike_avg_false_positive_pct_of_scene,41.332,37.458,percent_of_scene_area,10
-lookalike_avg_false_positive_area_UNVERIFIED,480.59,435.55,"km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",10
+lookalike_avg_false_positive_area_km2,148.354,134.461,"km2_per_scene (real GSD, latitude-corrected)",10

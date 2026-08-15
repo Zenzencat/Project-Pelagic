@@ -28,10 +28,10 @@
     "n_scenes": 10
   },
   {
-    "metric": "oil_avg_false_positive_area_UNVERIFIED",
-    "v1_value": 27.6,
-    "v2_value": 24.84,
-    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "metric": "oil_avg_false_positive_area_km2",
+    "v1_value": 8.948,
+    "v2_value": 8.113,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
     "n_scenes": 10
   },
   {
@@ -63,10 +63,10 @@
     "n_scenes": 10
   },
   {
-    "metric": "no_oil_avg_false_positive_area_UNVERIFIED",
-    "v1_value": 0.08,
-    "v2_value": 0.02,
-    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "metric": "no_oil_avg_false_positive_area_km2",
+    "v1_value": 0.024,
+    "v2_value": 0.005,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
     "n_scenes": 10
   },
   {
@@ -98,10 +98,10 @@
     "n_scenes": 10
   },
   {
-    "metric": "lookalike_avg_false_positive_area_UNVERIFIED",
-    "v1_value": 480.59,
-    "v2_value": 435.55,
-    "unit": "km2_per_scene [CAVEAT: demo mock coordinate scale, not a verified real GSD -- see notes]",
+    "metric": "lookalike_avg_false_positive_area_km2",
+    "v1_value": 148.354,
+    "v2_value": 134.461,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
     "n_scenes": 10
   }
 ]
