@@ -130,7 +130,12 @@ def main():
             
             plt.tight_layout()
             out_plot_path = os.path.join(docs_dir, f"holdout_{args.version}_viz_{scene_id}.png")
-            plt.savefig(out_plot_path, dpi=150)
+            # bbox_inches="tight": the third panel's title is two lines (the other
+            # two are one line), and tight_layout() sizes the axes to fit within the
+            # figure's existing bounds rather than growing the figure to fit a taller
+            # title -- without this, the top of that title renders past the canvas
+            # edge and savefig() silently clips it.
+            plt.savefig(out_plot_path, dpi=150, bbox_inches="tight")
             plt.close()
             
     # Print Summary
