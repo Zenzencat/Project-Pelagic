@@ -14,6 +14,14 @@ const DEMO_SCENES = [
   { id: 'oil_00001', title: 'ฉากที่ 2', category: 'oil' },
   { id: 'oil_00003', title: 'ฉากที่ 3', category: 'oil' },
   { id: 'oil_00004', title: 'ฉากที่ 4', category: 'oil' },
+  // Reverted from no_oil_00007 (and no_oil_00001 before that): reverse-geocoded
+  // every no_oil holdout scene's real coordinate and found "genuinely open
+  // water" and "live v2 model correctly outputs ~0% confidence" never overlap
+  // in this 10-scene set -- the only two confirmed-water scenes (no_oil_00000,
+  // no_oil_00001) both trigger live false positives (~67%, ~66%), and every
+  // scene the model correctly suppresses is on land. no_oil_00004 is a
+  // confirmed non-maritime (land) scene the model correctly abstains on --
+  // labeled as such below rather than mislabeled "clean water".
   { id: 'no_oil_00004', title: 'ฉากที่ 5', category: 'no_oil' },
 ];
 
@@ -48,14 +56,44 @@ function calcSlickAreaKm2(det) {
 // rendering/measuring that placeholder as if it were a detection.
 const hasRealDetection = (det) => !!det && det.confidence_score > 0.001;
 
-// Map controller to handle programmatically panning/zooming when selected detection changes
-function MapRecenter({ center }) {
+// Real bounding box to frame the camera on: the detected polygon's own
+// coordinate extent, not the (much larger) satellite scene footprint. A
+// fixed zoom centered on the scene made every contour icon-sized regardless
+// of its real area -- measured at 33x41px out of a 1180x1000 map viewport
+// for oil_00000's 162 km2 polygon at the old zoom=8. Falls back to the
+// scene footprint for no-oil detections, which have no real polygon to fit.
+function getFitBounds(det) {
+  if (!det) return null;
+  if (hasRealDetection(det) && det.geojson_mask && det.geojson_mask.coordinates) {
+    let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
+    for (const ring of det.geojson_mask.coordinates) {
+      for (const [lon, lat] of ring) {
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+      }
+    }
+    return [[minLat, minLon], [maxLat, maxLon]];
+  }
+  if (det.bbox) {
+    return [[det.bbox[0], det.bbox[1]], [det.bbox[2], det.bbox[3]]];
+  }
+  return null;
+}
+
+// Map controller to fit the camera to the selected detection's real bounding
+// box whenever the selection changes (not on every re-render -- keyed on
+// det.id so toggling a layer checkbox etc. doesn't re-trigger the fit/pan).
+function MapFitter({ det }) {
   const map = useMap();
   useEffect(() => {
-    if (center) {
-      map.panTo(center);
+    const bounds = getFitBounds(det);
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [80, 80], maxZoom: 14 });
     }
-  }, [center, map]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [det?.id, map]);
   return null;
 }
 
@@ -299,7 +337,7 @@ export default function App() {
                   </span>
                   <span style={{ fontWeight: 500 }}>
                     {isNoOil
-                      ? 'น้ำทะเลปกติ'
+                      ? 'พื้นที่ที่ไม่ใช่ทะเล'
                       : detected
                         ? `ขนาดคราบ: ${areaKm2.toFixed(1)} ตร.กม.`
                         : '—'}
@@ -325,7 +363,7 @@ export default function App() {
                   </span>
                 ) : (
                   <span style={{ fontWeight: 600, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <CheckCircle2 size={13} /> ไม่พบคราบน้ำมัน (Clean Water)
+                    <CheckCircle2 size={13} /> ไม่พบคราบน้ำมัน — พื้นที่ที่ไม่ใช่ทะเล (Non-maritime, model correctly abstains)
                   </span>
                 )}
               </div>
@@ -383,7 +421,7 @@ export default function App() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           
-          <MapRecenter center={getMapCenter()} />
+          <MapFitter det={selectedDet} />
 
           {/* Render selected detection overlays */}
           {selectedDet && (
