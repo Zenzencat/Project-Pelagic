@@ -44,6 +44,10 @@ Curated selection — 5 of the 14 available `holdout_v1/v2_viz_*.png` files, not
 |---|---|---|---|---|---|
 | `system_architecture.png` | Rendered system architecture diagram: Frontend (React/Leaflet) → Backend (FastAPI, real endpoint names) → Model Layer (PyTorch, from-scratch U-Net, explicitly no pretrained backbone) → Database (SQLite) → File Storage, with real data-flow labels | Not one of the three named feedback points, but closes a real gap (see below) | 2880×1120 | 2.57:1 | Rendered from the Mermaid source in `docs/system_architecture.md` at 2x scale via headless browser + `html2canvas` (in-browser `<img>`+canvas rasterization failed with a "tainted canvas" security error because Mermaid's text labels use SVG `foreignObject`; `html2canvas` renders the DOM directly and avoids that). Verified before rendering that the source itself already matched the corrected architecture info (real PyTorch/U-Net, no ONNX/ResNet, real endpoint paths cross-checked directly against `main.py`) — no drift found, so the source needed no fix, only rendering. Wider than 16:9 — will need modest letterboxing. |
 
+## demo_fallback/
+
+Live-demo safety net, not a primary slide asset: real screenshots of the actual running Track G demo page (all 5 verified scenes + one scene-switch-in-progress shot), captured for the presentation only in case the live app can't run on the day (projector/wifi/backend failure) — not meant to replace the live demo when it works.
+
 ---
 
 ## Gaps against the professor's three feedback points
