@@ -1,9 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Polyline, useMap } from 'react-leaflet';
-import { Activity, ShieldAlert, Layers, Play, Clock, Anchor, MapPin, Loader2, Info } from 'lucide-react';
+import { ShieldAlert, Layers, Anchor, Loader2, Info, CheckCircle2 } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 const API_BASE = 'http://localhost:8000';
+
+// The 5 verified demo scenes for the live presentation, in the fixed order
+// they should be presented -- not the raw DB history, which also contains
+// stale/dummy seed rows and would let a presenter accidentally click into
+// an unverified scene mid-demo.
+const DEMO_SCENES = [
+  { id: 'oil_00000', title: 'ฉากที่ 1', category: 'oil' },
+  { id: 'oil_00001', title: 'ฉากที่ 2', category: 'oil' },
+  { id: 'oil_00003', title: 'ฉากที่ 3', category: 'oil' },
+  { id: 'oil_00004', title: 'ฉากที่ 4', category: 'oil' },
+  { id: 'no_oil_00004', title: 'ฉากที่ 5', category: 'no_oil' },
+];
+
+// Real ground area per the GeoJSON polygon's own lat/lon extent -- same
+// lat-corrected km/deg methodology as src/compare_checkpoints.py
+// (pixel_area_km2), applied to the actual detected polygon instead of a
+// per-pixel constant. Replaces the old hardcoded 14.5/8.5 km2 mock badge.
+const KM_PER_DEG_LAT = 111.32;
+
+function calcSlickAreaKm2(det) {
+  if (!det || !det.geojson_mask || !det.geojson_mask.coordinates || !det.bbox) return 0;
+  const centerLat = (det.bbox[0] + det.bbox[2]) / 2;
+  const kmPerDegLon = KM_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180);
+  let totalKm2 = 0;
+  for (const ring of det.geojson_mask.coordinates) {
+    let sum = 0;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [lon1, lat1] = ring[i];
+      const [lon2, lat2] = ring[i + 1];
+      const x1 = lon1 * kmPerDegLon, y1 = lat1 * KM_PER_DEG_LAT;
+      const x2 = lon2 * kmPerDegLon, y2 = lat2 * KM_PER_DEG_LAT;
+      sum += x1 * y2 - x2 * y1;
+    }
+    totalKm2 += Math.abs(sum) / 2;
+  }
+  return totalKm2;
+}
+
+// Zero-confidence detections are the API's fallback placeholder square
+// (src/api/main.py draws a tiny mock polygon when the model finds no slick
+// pixels at all), not a real contour -- treat them as "no oil" rather than
+// rendering/measuring that placeholder as if it were a detection.
+const hasRealDetection = (det) => !!det && det.confidence_score > 0.001;
 
 // Map controller to handle programmatically panning/zooming when selected detection changes
 function MapRecenter({ center }) {
@@ -22,10 +65,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [predicting, setPredicting] = useState(false);
   const [error, setError] = useState(null);
-  
-  // Simulated scene ID input
-  const [sceneToPredict, setSceneToPredict] = useState('S1_MOCK_SCENE_004');
-  
+
   // Map Layer Controls
   const [showFootprint, setShowFootprint] = useState(true);
   const [showSlick, setShowSlick] = useState(true);
@@ -44,8 +84,14 @@ export default function App() {
       setDetections(data);
       
       if (data.length > 0) {
-        // Auto-select first detection, or a specific one (e.g. newly created)
-        const targetId = autoSelectId || data[0].id;
+        // Auto-select a specific detection if given (e.g. newly created), else
+        // default to the first scene in the fixed demo lineup (not just the
+        // most recently touched DB row) so a fresh page load always starts
+        // the presentation from the same, predictable scene.
+        const firstDemo = DEMO_SCENES.map(s => s.id)
+          .map(id => data.find(d => d.scene_id === id))
+          .find(Boolean);
+        const targetId = autoSelectId || (firstDemo ? firstDemo.id : data[0].id);
         fetchDetectionDetails(targetId);
       } else {
         setLoading(false);
@@ -77,47 +123,44 @@ export default function App() {
     fetchDetections();
   }, []);
 
-  // 3. Trigger U-Net inference on backend
-  const handlePredict = async (e) => {
-    e.preventDefault();
-    if (!sceneToPredict.trim()) return;
+  // 3. Select one of the 5 verified demo scenes. Switches instantly to the
+  // cached detection if it's already in the DB (the normal demo path, since
+  // all 5 are pre-seeded); only falls back to a live U-Net inference call if
+  // a scene is somehow missing (e.g. a freshly reset database).
+  const handleSelectScene = async (sceneId) => {
+    const existing = detections.find(d => d.scene_id === sceneId);
+    if (existing) {
+      fetchDetectionDetails(existing.id);
+      return;
+    }
 
     try {
       setPredicting(true);
       setError(null);
-      
+
       const res = await fetch(`${API_BASE}/api/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scene_id: sceneToPredict })
+        body: JSON.stringify({ scene_id: sceneId })
       });
-      
+
       if (res.status === 503) {
         const data = await res.json();
         throw new Error(data.detail || 'Model is not loaded on server.');
       }
-      
+
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail || 'Error running model inference.');
       }
-      
+
       const newDet = await res.json();
-      
-      // Show success notification toast
-      showToast(`ตรวจพบรอยคราบน้ำมันในฉาก ${sceneToPredict} สำเร็จ!`);
-      
-      // Re-fetch history list and auto-select the new detection
+      showToast(`วิเคราะห์ฉาก ${sceneId} สำเร็จ!`);
       await fetchDetections(newDet.id);
-      setPredicting(false);
-      
-      // Cycle simulated ID for easy consecutive test clicks
-      if (sceneToPredict === 'S1_MOCK_SCENE_004') setSceneToPredict('S1_MOCK_SCENE_005');
-      else setSceneToPredict('S1_MOCK_SCENE_004');
-      
     } catch (err) {
       console.error(err);
       setError(err.message);
+    } finally {
       setPredicting(false);
     }
   };
@@ -194,59 +237,77 @@ export default function App() {
           </div>
         )}
 
-        {/* History List */}
+        {/* Demo Scene Selector -- fixed to the 5 verified scenes only */}
         <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: '16px 20px 8px 20px', fontWeight: 600 }}>
-          ประวัติการวิเคราะห์ฉากดาวเทียม (Processed Scenes)
+          เลือกฉากตัวอย่างสำหรับสาธิต (Demo Scenes)
         </div>
-        
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
-          {detections.length === 0 ? (
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', padding: '20px 0', textAlign: 'center' }}>
-              ไม่มีข้อมูลประวัติการตรวจจับในระบบ.
-            </p>
-          ) : (
-            detections.map(det => {
-              const isActive = selectedDet && selectedDet.id === det.id;
-              // Format geojson features area estimation or mock size
-              const displayArea = det.scene_id.includes('MOCK') ? '8.5' : '14.5';
-              return (
-                <div 
-                  key={det.id}
-                  onClick={() => fetchDetectionDetails(det.id)}
-                  style={{
-                    backgroundColor: isActive ? 'rgba(6, 182, 212, 0.05)' : 'rgba(255,255,255,0.01)',
-                    border: '1px solid',
-                    borderColor: isActive ? 'var(--primary)' : 'var(--border-color)',
-                    borderRadius: '8px',
-                    padding: '12px 14px',
-                    marginBottom: '10px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '240px' }}>
-                      {det.scene_id}
+          {DEMO_SCENES.map(scene => {
+            const det = detections.find(d => d.scene_id === scene.id);
+            const isActive = selectedDet && selectedDet.scene_id === scene.id;
+            const isNoOil = scene.category === 'no_oil';
+            const detected = hasRealDetection(det);
+            const areaKm2 = detected ? calcSlickAreaKm2(det) : 0;
+
+            return (
+              <div
+                key={scene.id}
+                onClick={() => handleSelectScene(scene.id)}
+                style={{
+                  backgroundColor: isActive ? 'rgba(6, 182, 212, 0.05)' : 'rgba(255,255,255,0.01)',
+                  border: '1px solid',
+                  borderColor: isActive ? 'var(--primary)' : 'var(--border-color)',
+                  borderRadius: '8px',
+                  padding: '12px 14px',
+                  marginBottom: '10px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>
+                    {scene.title}
+                  </span>
+                  {!det ? (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px',
+                      backgroundColor: 'rgba(255,255,255,0.08)', color: 'var(--text-muted)'
+                    }}>
+                      รอวิเคราะห์
                     </span>
+                  ) : detected ? (
                     <span style={{
                       fontSize: '0.7rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px',
                       backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)'
                     }}>
                       {(det.confidence_score * 100).toFixed(1)}% Conf
                     </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                    <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Clock size={12} /> {det.detected_at.split(' ')[0]}
+                  ) : (
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px',
+                      display: 'flex', alignItems: 'center', gap: '3px',
+                      backgroundColor: 'rgba(161, 161, 170, 0.15)', color: 'var(--text-muted)', border: '1px solid var(--border-color)'
+                    }}>
+                      <CheckCircle2 size={11} /> ไม่พบคราบ
                     </span>
-                    <span style={{ fontWeight: 500 }}>
-                      ขนาดคราบ: {displayArea} ตร.กม.
-                    </span>
-                  </div>
+                  )}
                 </div>
-              );
-            })
-          )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', fontFamily: 'monospace', fontSize: '0.72rem' }}>
+                    {scene.id}
+                  </span>
+                  <span style={{ fontWeight: 500 }}>
+                    {isNoOil
+                      ? 'น้ำทะเลปกติ'
+                      : detected
+                        ? `ขนาดคราบ: ${areaKm2.toFixed(1)} ตร.กม.`
+                        : '—'}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Selected Details Panel */}
@@ -256,6 +317,18 @@ export default function App() {
               <Info size={14} color="var(--primary)" /> รายละเอียดคราบนํ้ามัน (Slick Details)
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>ขนาดคราบน้ำมัน:</span>
+                {hasRealDetection(selectedDet) ? (
+                  <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                    {calcSlickAreaKm2(selectedDet).toFixed(1)} ตร.กม.
+                  </span>
+                ) : (
+                  <span style={{ fontWeight: 600, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <CheckCircle2 size={13} /> ไม่พบคราบน้ำมัน (Clean Water)
+                  </span>
+                )}
+              </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>พิกัดศูนย์กลาง:</span>
                 <span style={{ fontWeight: 500, fontFamily: 'monospace' }}>
@@ -292,31 +365,6 @@ export default function App() {
             </div>
           </div>
         )}
-
-        {/* Prediction Trigger Form */}
-        <form onSubmit={handlePredict} style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '10px' }}>
-          <input 
-            type="text" 
-            value={sceneToPredict} 
-            onChange={(e) => setSceneToPredict(e.target.value)}
-            placeholder="Scene ID (e.g. S1_MOCK_SCENE_004)"
-            style={{
-              flex: 1, backgroundColor: 'var(--bg-dark)', border: '1px solid var(--border-color)',
-              borderRadius: '6px', padding: '8px 12px', fontSize: '0.8rem', color: 'var(--text-main)',
-              outline: 'none'
-            }}
-          />
-          <button 
-            type="submit" 
-            style={{
-              backgroundColor: 'var(--primary)', color: '#fff', border: 'none', borderRadius: '6px',
-              padding: '8px 14px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '6px', transition: 'background-color 0.2s'
-            }}
-          >
-            <Play size={12} fill="#fff" /> วิเคราะห์ภาพ
-          </button>
-        </form>
       </div>
 
       {/* 4. Right Map Panel */}
@@ -359,20 +407,26 @@ export default function App() {
                 />
               )}
 
-              {/* B. Oil Slick Contours */}
-              {showSlick && selectedDet.geojson_mask && selectedDet.geojson_mask.coordinates && (
+              {/* B. Oil Slick Contours -- bold, high-contrast outline so the
+                  detected boundary itself reads clearly on a projector, not
+                  just a filled blob. Suppressed for zero-confidence
+                  detections, which are the API's fallback placeholder
+                  square rather than a real contour (see hasRealDetection). */}
+              {showSlick && hasRealDetection(selectedDet) && selectedDet.geojson_mask && selectedDet.geojson_mask.coordinates && (
                 selectedDet.geojson_mask.coordinates.map((poly, pIdx) => {
                   // GeoJSON holds [lon, lat], Leaflet needs [lat, lon]
                   const leafPositions = poly.map(pt => [pt[1], pt[0]]);
                   return (
-                    <Polygon 
+                    <Polygon
                       key={pIdx}
                       positions={leafPositions}
                       pathOptions={{
-                        color: '#d946ef',
-                        weight: 2,
+                        color: '#facc15',
+                        weight: 3,
+                        opacity: 1,
+                        lineJoin: 'round',
                         fillColor: '#d946ef',
-                        fillOpacity: 0.4
+                        fillOpacity: 0.35
                       }}
                     />
                   );
