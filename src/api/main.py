@@ -28,6 +28,7 @@ from src.models.unet import UNet
 from src.data.preprocess import calibrate_to_sigma, speckle_filter, to_decibels, normalize_image
 from src.inference import run_tiled_inference
 from src.analysis.geoutils import get_scene_geolocation
+from src.analysis.contour import mask_to_polygons
 
 # Real Sentinel-1 GRD ground sampling distance, confirmed directly from the
 # holdout GeoTIFFs' ModelPixelScaleTag (consistent across all 30 scenes checked:
@@ -218,9 +219,10 @@ def predict(payload: PredictRequest):
     probs, preds_bin = run_tiled_inference(model, norm, device)
     preds = preds_bin * 255
         
-    # 4. Contour Tracing (Convert binary mask to GeoJSON Polygon)
-    contours, _ = cv2.findContours(preds, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
+    # 4. Contour Tracing (Convert binary mask to GeoJSON Polygon, via
+    # src/analysis/contour.py's mask_to_polygons -- see that module for the
+    # simplification-tolerance and smoothing rationale)
+
     # Coordinate system mapping: real WGS84 georeferencing embedded in the
     # scene's GeoTIFF (all real Trujillo-Acatitla scenes carry this). Falls
     # back to a fixed placeholder point only for scenes with no embedded
@@ -236,25 +238,9 @@ def predict(payload: PredictRequest):
         center_lon = 100.5
         scale = REAL_PIXEL_SCALE_DEG
     H, W = preds.shape
-    
-    polygons = []
-    for cnt in contours:
-        # Simplify contour lines to make GeoJSON lighter
-        epsilon = 0.01 * cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-        
-        poly_pts = []
-        for pt in approx:
-            x, y = pt[0]
-            # Convert pixel coords to Latitude/Longitude
-            lat = center_lat + (H // 2 - y) * scale
-            lon = center_lon + (x - W // 2) * scale
-            poly_pts.append([lon, lat])
-            
-        if len(poly_pts) >= 3:
-            poly_pts.append(poly_pts[0]) # Close polygon
-            polygons.append(poly_pts)
-            
+
+    polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
+
     # Fallback to a tiny mock polygon if no slicks were segmented
     if not polygons:
         polygons = [[
