@@ -1,28 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Polyline, useMap } from 'react-leaflet';
-import { ShieldAlert, Layers, Anchor, Loader2, Info, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Layers, Anchor, Loader2, Info } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 
 const API_BASE = 'http://localhost:8000';
 
-// The 5 verified demo scenes for the live presentation, in the fixed order
+// The 4 verified demo scenes for the live presentation, in the fixed order
 // they should be presented -- not the raw DB history, which also contains
 // stale/dummy seed rows and would let a presenter accidentally click into
 // an unverified scene mid-demo.
+//
+// No no_oil scene: every no_oil holdout scene turned out to be either
+// genuinely land (no_oil_00002/3/4/6/7/8/9), a live false positive on real
+// water (no_oil_00000/1), or a broken/corrupted file (no_oil_00005) -- see
+// docs/deck_assets/MANIFEST.md for the full investigation. There's no
+// "real water, correctly suppressed" scene available in this holdout set,
+// so the live demo is oil-detection scenes only.
 const DEMO_SCENES = [
-  { id: 'oil_00000', title: 'ฉากที่ 1', category: 'oil' },
-  { id: 'oil_00001', title: 'ฉากที่ 2', category: 'oil' },
-  { id: 'oil_00003', title: 'ฉากที่ 3', category: 'oil' },
-  { id: 'oil_00004', title: 'ฉากที่ 4', category: 'oil' },
-  // Reverted from no_oil_00007 (and no_oil_00001 before that): reverse-geocoded
-  // every no_oil holdout scene's real coordinate and found "genuinely open
-  // water" and "live v2 model correctly outputs ~0% confidence" never overlap
-  // in this 10-scene set -- the only two confirmed-water scenes (no_oil_00000,
-  // no_oil_00001) both trigger live false positives (~67%, ~66%), and every
-  // scene the model correctly suppresses is on land. no_oil_00004 is a
-  // confirmed non-maritime (land) scene the model correctly abstains on --
-  // labeled as such below rather than mislabeled "clean water".
-  { id: 'no_oil_00004', title: 'ฉากที่ 5', category: 'no_oil' },
+  { id: 'oil_00000', title: 'ฉากที่ 1' },
+  { id: 'oil_00001', title: 'ฉากที่ 2' },
+  { id: 'oil_00003', title: 'ฉากที่ 3' },
+  { id: 'oil_00004', title: 'ฉากที่ 4' },
 ];
 
 // Real ground area per the GeoJSON polygon's own lat/lon extent -- same
@@ -161,9 +159,9 @@ export default function App() {
     fetchDetections();
   }, []);
 
-  // 3. Select one of the 5 verified demo scenes. Switches instantly to the
+  // 3. Select one of the 4 verified demo scenes. Switches instantly to the
   // cached detection if it's already in the DB (the normal demo path, since
-  // all 5 are pre-seeded); only falls back to a live U-Net inference call if
+  // all 4 are pre-seeded); only falls back to a live U-Net inference call if
   // a scene is somehow missing (e.g. a freshly reset database).
   const handleSelectScene = async (sceneId) => {
     const existing = detections.find(d => d.scene_id === sceneId);
@@ -275,18 +273,21 @@ export default function App() {
           </div>
         )}
 
-        {/* Demo Scene Selector -- fixed to the 5 verified scenes only */}
+        {/* Demo Scene Selector -- fixed to the 4 verified oil-detection scenes only.
+            Scene list + details panel share one scrollable region so any
+            leftover vertical space (a 4-card list is shorter than most
+            viewports) settles below the details panel instead of opening a
+            gap between the last card and the panel's top border. */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: '16px 20px 8px 20px', fontWeight: 600 }}>
           เลือกฉากตัวอย่างสำหรับสาธิต (Demo Scenes)
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
+        <div style={{ padding: '0 20px' }}>
           {DEMO_SCENES.map(scene => {
             const det = detections.find(d => d.scene_id === scene.id);
             const isActive = selectedDet && selectedDet.scene_id === scene.id;
-            const isNoOil = scene.category === 'no_oil';
-            const detected = hasRealDetection(det);
-            const areaKm2 = detected ? calcSlickAreaKm2(det) : 0;
+            const areaKm2 = det ? calcSlickAreaKm2(det) : 0;
 
             return (
               <div
@@ -314,20 +315,12 @@ export default function App() {
                     }}>
                       รอวิเคราะห์
                     </span>
-                  ) : detected ? (
+                  ) : (
                     <span style={{
                       fontSize: '0.7rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px',
                       backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)'
                     }}>
                       {(det.confidence_score * 100).toFixed(1)}% Conf
-                    </span>
-                  ) : (
-                    <span style={{
-                      fontSize: '0.7rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px',
-                      display: 'flex', alignItems: 'center', gap: '3px',
-                      backgroundColor: 'rgba(161, 161, 170, 0.15)', color: 'var(--text-muted)', border: '1px solid var(--border-color)'
-                    }}>
-                      <CheckCircle2 size={11} /> ไม่พบคราบ
                     </span>
                   )}
                 </div>
@@ -336,11 +329,7 @@ export default function App() {
                     {scene.id}
                   </span>
                   <span style={{ fontWeight: 500 }}>
-                    {isNoOil
-                      ? 'พื้นที่ที่ไม่ใช่ทะเล'
-                      : detected
-                        ? `ขนาดคราบ: ${areaKm2.toFixed(1)} ตร.กม.`
-                        : '—'}
+                    {det ? `ขนาดคราบ: ${areaKm2.toFixed(1)} ตร.กม.` : '—'}
                   </span>
                 </div>
               </div>
@@ -357,15 +346,9 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>ขนาดคราบน้ำมัน:</span>
-                {hasRealDetection(selectedDet) ? (
-                  <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
-                    {calcSlickAreaKm2(selectedDet).toFixed(1)} ตร.กม.
-                  </span>
-                ) : (
-                  <span style={{ fontWeight: 600, color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <CheckCircle2 size={13} /> ไม่พบคราบน้ำมัน — พื้นที่ที่ไม่ใช่ทะเล (Non-maritime, model correctly abstains)
-                  </span>
-                )}
+                <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                  {calcSlickAreaKm2(selectedDet).toFixed(1)} ตร.กม.
+                </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>พิกัดศูนย์กลาง:</span>
@@ -403,6 +386,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* 4. Right Map Panel */}

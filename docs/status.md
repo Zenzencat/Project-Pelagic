@@ -48,9 +48,22 @@ This document captures the current status of the project, including recent resol
 
 ---
 
-## Demo Lineup — Verified Fresh This Session (Session 5)
+## Demo Lineup — 4 Oil-Detection Scenes Only (Updated in the presentation-prep sessions after Session 5)
 
-Re-verified end-to-end after a full DB reset and backend restart, not cited from a prior session's result:
+The live demo dropped from 5 scenes to 4, oil-detection only. `no_oil_00004` was
+in the lineup as the "clean water, no oil" example, but a later round fixing
+the map's fixed-zoom framing (it made every detected slick icon-sized
+regardless of real area) also exposed that `no_oil_00004`'s real coordinates
+are inland, not water. Investigating every `no_oil` holdout scene as a
+replacement found a harder problem: across all 10 `no_oil` scenes,
+**genuinely open water and the live v2 checkpoint correctly outputting ~0%
+confidence never co-occur** — the two confirmed-water scenes (`no_oil_00000`,
+`no_oil_00001`) both false-positive live (~67.8%, ~66.6%), every scene the
+model correctly suppresses is on land, and one file (`no_oil_00005`) is a
+broken all-zero array. Full investigation, including how each scene was
+checked (raw SAR content + reverse geocoding): `docs/deck_assets/MANIFEST.md`.
+Rather than show a land scene mislabeled as water, or a live false positive,
+the demo is now oil-detection scenes only:
 
 | Scene | Confidence | Polygons | Real coordinates |
 |---|---|---|---|
@@ -58,9 +71,22 @@ Re-verified end-to-end after a full DB reset and backend restart, not cited from
 | oil_00001 | 90.9043% | 27 | 35.4087N, 34.9938E |
 | oil_00003 | 96.3351% | 9 | 20.1616N, 38.2182E |
 | oil_00004 | 95.2886% | 228 | 35.8224N, 35.0308E |
-| no_oil_00004 | 0.0000% | 1 (fallback box) | 36.2154N, 36.6159E |
 
-All values match the last-confirmed numbers exactly (zero regression), and coordinates are real and vary correctly per scene (confirmed independently against `docs/holdout_scene_coordinates.json`). Confirmed in-browser: switching scenes re-centers the Leaflet map and re-renders overlay geometry, not just the API response.
+Values match the last-confirmed numbers exactly (zero regression), and
+coordinates are real and vary correctly per scene (confirmed independently
+against `docs/holdout_scene_coordinates.json`). Confirmed in-browser:
+switching scenes re-centers/re-zooms the Leaflet map to fit the real detected
+polygon's bounding box (not a fixed zoom) and re-renders overlay geometry,
+not just the API response.
+
+**Also fixed since this table was first written**: the "ขนาดคราบ" (slick
+size) badge described as a hardcoded fake `8.5`/`14.5` km² value in Recent
+Resolution #8 and Open Issue #2 below is no longer accurate — it's since been
+wired to a real shoelace-formula area computed from each detection's own
+GeoJSON polygon (same lat-corrected km/deg method used elsewhere in this
+repo). Left the original entries below as-is rather than rewriting session
+history; treat this note as the current source of truth on that specific
+item.
 
 ---
 
