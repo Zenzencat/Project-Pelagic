@@ -253,11 +253,13 @@ def predict(payload: PredictRequest):
         center_lat = geo["center_lat"]
         center_lon = geo["center_lon"]
         scale = geo["pixel_scale_deg"]
+        scene_bbox = (geo["min_lat"], geo["min_lon"], geo["max_lat"], geo["max_lon"])
         has_real_geo = True
     except ValueError:
         center_lat = 9.0
         center_lon = 100.5
         scale = REAL_PIXEL_SCALE_DEG
+        scene_bbox = None
         has_real_geo = False
     H, W = preds.shape
 
@@ -268,7 +270,7 @@ def predict(payload: PredictRequest):
     # skipped for the synthetic-scene placeholder-coordinate fallback above,
     # which has no real location to check land/sea against.
     if has_real_geo:
-        preds, _land_stats = strip_land_pixels(preds, center_lat, center_lon, scale)
+        preds, _land_stats = strip_land_pixels(preds, center_lat, center_lon, scale, bbox=scene_bbox)
 
     polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
 
@@ -459,6 +461,7 @@ def live_fetch(payload: LiveFetchRequest):
     except ValueError as e:
         return {"status": "ERROR", "detail": f"Fetched scene has no embedded georeferencing: {e}", "detection": None}
     center_lat, center_lon, scale = geo["center_lat"], geo["center_lon"], geo["pixel_scale_deg"]
+    scene_bbox = (geo["min_lat"], geo["min_lon"], geo["max_lat"], geo["max_lon"])
     H, W = preds.shape
 
     # Land-sea masking (src/analysis/landmask.py): live-fetched scenes cover
@@ -468,7 +471,9 @@ def live_fetch(payload: LiveFetchRequest):
     # before contour extraction so the reported polygon/area/confidence are
     # all corrected, not just the map drawing. Always applicable here since
     # geo above is always real (the except branch above already returned).
-    preds, land_stats = strip_land_pixels(preds, center_lat, center_lon, scale)
+    # bbox enables the real-OSM island refinement (src/analysis/osm_coastline.py,
+    # Round 16) on top of the ~930m raster (Round 15).
+    preds, land_stats = strip_land_pixels(preds, center_lat, center_lon, scale, bbox=scene_bbox)
 
     polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
     if not polygons:
@@ -534,11 +539,15 @@ def live_fetch(payload: LiveFetchRequest):
     conn.commit()
     conn.close()
 
+    osm_note = (
+        f" ({land_stats['oil_px_removed_by_osm_only']:,} px via real OSM island refinement)"
+        if land_stats.get("oil_px_removed_by_osm_only") else ""
+    )
     land_note = (
         f" Land-sea mask removed {land_stats['oil_px_removed_on_land']:,} of "
         f"{land_stats['oil_px_total_before']:,} raw predicted oil px "
         f"({land_stats['oil_px_removed_on_land'] / land_stats['oil_px_total_before'] * 100:.1f}%) "
-        f"that fell on land."
+        f"that fell on land{osm_note}."
         if land_stats["oil_px_total_before"] > 0 else ""
     )
     return {

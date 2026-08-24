@@ -159,7 +159,14 @@ def get_nearby_vessels(gfw_token, center_lat, center_lon, acquisition_datetime_i
         raw_entries = []
         for entry_group in data.get("entries", []):
             for rows in entry_group.values():
-                raw_entries.extend(rows)
+                # A region with genuinely zero vessel presence for the date
+                # returns `null` for its dataset key here (verified live
+                # against a real remote Patagonia-fjord bbox/date with no
+                # AIS activity), not an empty list -- found via a real crash
+                # (`'NoneType' object is not iterable`) on that real query,
+                # not assumed defensively.
+                if rows:
+                    raw_entries.extend(rows)
     except (ValueError, AttributeError) as e:
         return {"status": "error", "vessels": [], "detail": f"Could not parse GFW response: {e}"}
 
