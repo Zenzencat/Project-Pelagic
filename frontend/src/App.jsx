@@ -130,6 +130,27 @@ function spreadColocatedVessels(vessels) {
   return out;
 }
 
+// Land-sea masking (src/analysis/landmask.py) carves land -- including
+// every small island in an archipelago -- out of the raw prediction, which
+// shatters what would otherwise be one or a few large water regions into
+// many small disjoint fragments (real, separate polygons, not duplicates:
+// confirmed directly by running shapely's unary_union on a real 692-
+// fragment live-fetch result over the Stockholm Archipelago -- it did not
+// reduce the count at all, since there's nothing overlapping to merge).
+// At a fixed 3px stroke, a dense cluster of these small fragments packed
+// close together reads as a solid yellow mass rather than distinct
+// boundaries -- easy to mistake for a second, unlabeled layer. Thinning
+// the stroke as fragment count grows keeps each boundary legible instead.
+// Thresholds set from real measured fragment counts across this project's
+// scenes: the 4 cached demo scenes range 9-228, live-fetch scenes (which
+// always carry land-mask fragmentation) range 138-692.
+function getSlickStrokeWeight(nFragments) {
+  if (nFragments <= 50) return 3;
+  if (nFragments <= 150) return 2;
+  if (nFragments <= 400) return 1.5;
+  return 1;
+}
+
 // Zero-confidence detections are the API's fallback placeholder square
 // (src/api/main.py draws a tiny mock polygon when the model finds no slick
 // pixels at all), not a real contour -- treat them as "no oil" rather than
@@ -668,9 +689,14 @@ export default function App() {
                   detected boundary itself reads clearly on a projector, not
                   just a filled blob. Suppressed for zero-confidence
                   detections, which are the API's fallback placeholder
-                  square rather than a real contour (see hasRealDetection). */}
-              {showSlick && hasRealDetection(selectedDet) && selectedDet.geojson_mask && selectedDet.geojson_mask.coordinates && (
-                selectedDet.geojson_mask.coordinates.map((poly, pIdx) => {
+                  square rather than a real contour (see hasRealDetection).
+                  Stroke weight scales down with fragment count
+                  (getSlickStrokeWeight above) so a heavily land-fragmented
+                  scene's many small boundaries don't visually merge into a
+                  solid mass at a fixed bold weight. */}
+              {showSlick && hasRealDetection(selectedDet) && selectedDet.geojson_mask && selectedDet.geojson_mask.coordinates && (() => {
+                const strokeWeight = getSlickStrokeWeight(selectedDet.geojson_mask.coordinates.length);
+                return selectedDet.geojson_mask.coordinates.map((poly, pIdx) => {
                   // GeoJSON holds [lon, lat], Leaflet needs [lat, lon]
                   const leafPositions = poly.map(pt => [pt[1], pt[0]]);
                   return (
@@ -679,7 +705,7 @@ export default function App() {
                       positions={leafPositions}
                       pathOptions={{
                         color: '#facc15',
-                        weight: 3,
+                        weight: strokeWeight,
                         opacity: 1,
                         lineJoin: 'round',
                         fillColor: '#d946ef',
@@ -687,8 +713,8 @@ export default function App() {
                       }}
                     />
                   );
-                })
-              )}
+                });
+              })()}
 
               {/* C. AIS Vessel Markers & Lines -- spreadColocatedVessels
                   handles vessels that share an identical reported AIS

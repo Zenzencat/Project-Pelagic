@@ -71,6 +71,8 @@ Live-mode safety net, same purpose and standard as `demo_fallback/` above but fo
 
 **Round 16 additions (`05`-`10`)**: `01`-`04` above are the original Round 14/15 Singapore Strait set, left untouched (not deleted or overwritten) — these add variety on top, per `docs/status.md` Resolution #13. Captured with `scripts/capture_live_variety_screenshots.js` (same real-call, same tile-load-wait standard as `01`-`04` and as `demo_fallback/`'s Track K fix) across three genuinely different real bboxes/dates in one run — nothing here was staged or re-run to get a nicer-looking result than what came back.
 
+**Re-captured once more after Resolution #14** (fragment-scaled slick stroke width — see `docs/status.md`): `05`-`10` all reflect the current thinner stroke on high-fragment scenes (Stockholm `07`/`08` was the worst case at 692 fragments). Land-mask stats, vessel data, and every real number in the table below are unchanged from the first Round 16 capture — only the slick polygon's stroke width changed.
+
 | File | Shows | Dimensions | Notes |
 |---|---|---|---|
 | `05_singapore_landmask_fixed_result.png` | Full sidebar + map, same Singapore Strait bbox as `01`-`04`, re-run after the Round 16 land-mask fix: real `OK:` banner now reads *"Land-sea mask removed 781,193 of 2,641,623 raw predicted oil px (29.6%) that fell on land (65,395 px via real OSM island refinement)"* | 2880×2000 | Full page. Reference shot for the fixed case — compare against `03` to see Pulau Semakau now excluded. |
