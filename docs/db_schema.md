@@ -31,6 +31,12 @@ erDiagram
     text geojson_mask
     text image_path
     text checkpoint_hash
+    text source
+    text acquisition_start_utc
+    text acquisition_end_utc
+    text cdse_product_id
+    text vessel_attribution_status
+    real vessel_search_radius_km
   }
 
   NEARBY_VESSELS {
@@ -63,11 +69,32 @@ CREATE TABLE detections (
     bbox_max_lon REAL NOT NULL,             -- Bounding box Max Longitude
     geojson_mask TEXT NOT NULL,             -- GeoJSON geometry of the detected slick polygon
     image_path TEXT NOT NULL,               -- Local file path to the output overlay mask (.png)
-    checkpoint_hash TEXT                    -- First 12 hex chars of the checkpoint file's MD5.
+    checkpoint_hash TEXT,                   -- First 12 hex chars of the checkpoint file's MD5.
                                              -- Lets /api/predict tell a genuine cache hit (same
                                              -- scene_id, same checkpoint) apart from a stale row
                                              -- left by a since-swapped checkpoint, and refresh it
                                              -- in place instead of silently returning old results.
+    source TEXT NOT NULL DEFAULT 'holdout', -- 'holdout' | 'synthetic' | 'live'. Only 'live'
+                                             -- detections (POST /api/live/fetch) have a real
+                                             -- acquisition datetime -- see below.
+    acquisition_start_utc TEXT,             -- Real Sentinel-1 acquisition start, straight from
+    acquisition_end_utc TEXT,               -- CDSE's OData catalog (ContentDate.Start/End) --
+                                             -- never fabricated/defaulted. NULL for holdout/
+                                             -- synthetic scenes, which have no acquisition
+                                             -- timestamp anywhere in the source dataset (see
+                                             -- docs/status.md).
+    cdse_product_id TEXT,                   -- Real CDSE OData product UUID for 'live' detections.
+    vessel_attribution_status TEXT,         -- Why nearby_vessels is populated or empty:
+                                             -- 'ok' (real GFW vessels found), 'empty' (GFW
+                                             -- queried, zero within radius), 'skipped_no_credentials'
+                                             -- (GFW_TOKEN unset), 'skipped_no_timestamp' (no real
+                                             -- acquisition_start_utc to query GFW with -- every
+                                             -- holdout/synthetic detection), or 'error' (GFW query
+                                             -- failed). Lets the frontend show an honest reason
+                                             -- instead of a silent "0 vessels" that looks identical
+                                             -- to "never checked." Replaces the old hardcoded
+                                             -- mock_vessels this project shipped with previously.
+    vessel_search_radius_km REAL            -- Radius used for the GFW query, for 'live' detections.
 );
 
 -- Table: nearby_vessels

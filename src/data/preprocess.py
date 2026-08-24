@@ -135,6 +135,42 @@ def extract_patches_balanced(image, mask, patch_size=256, stride=128, category="
 
     return image_patches, mask_patches
 
+def preprocess_for_prediction(image_raw, already_calibrated=False):
+    """
+    Real-vs-synthetic-aware preprocessing for a single full scene, shared by
+    src/api/main.py's /api/predict (cached holdout/synthetic scenes) and
+    /api/live/fetch (live CDSE scenes), so the two entry points can't drift
+    apart the way whole-image-vs-tiled inference once did (see
+    src/inference.py::run_tiled_inference's docstring). Branches on
+    np.any(image_raw < 0) exactly as /api/predict originally did inline, to
+    distinguish already-dB-scale real Sentinel-1 holdout imagery from
+    linear-scale data.
+
+    already_calibrated=True skips calibrate_to_sigma()'s DN-squaring step in
+    the linear branch -- for live CDSE scenes, which arrive as real
+    SIGMA0_ELLIPSOID-calibrated linear sigma0 from Sentinel Hub (see
+    src/data/cdse_fetch.py), not uncalibrated raw digital numbers.
+    Synthetic scenes (the only other linear-scale caller) keep
+    already_calibrated=False, preserving the exact prior behavior.
+
+    Returns the normalized (H, W, 2) array ready for run_tiled_inference().
+    """
+    if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
+        image_raw = image_raw.transpose(1, 2, 0)
+
+    if np.any(image_raw < 0):
+        # Already in dB scale (real Sentinel-1 holdout imagery).
+        linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
+        filt = speckle_filter(linear, window_size=5)
+        db = 10.0 * np.log10(np.clip(filt, 1e-5, None))
+        return normalize_image(db)
+    else:
+        sig = image_raw.astype(np.float32) if already_calibrated else calibrate_to_sigma(image_raw)
+        filt = speckle_filter(sig, window_size=5)
+        db = to_decibels(filt)
+        return normalize_image(db)
+
+
 def run_full_preprocessing(image_raw, mask_raw=None, patch_size=256, stride=128, category=None):
     """
     Runs the full pipeline sequence: calibration -> filtering -> dB scale -> normalize -> extract patches.

@@ -7,6 +7,12 @@ torchvision>=0.15.0
 opencv-python>=4.7.0
 pydantic>=2.0
 
+# Land-sea masking for predicted oil-slick pixels (src/analysis/landmask.py,
+# used by /api/predict and /api/live/fetch). Bundles a ~1km-resolution
+# global land/ocean raster (~2.5MB compressed .npz) -- no network call, no
+# heavier geospatial stack (shapely/geopandas/fiona) needed.
+global-land-mask>=1.0.0
+
 # Optional: only needed to actually run src/analysis/era5_wind_check.py.
 # Requires a free CDS account + API key (https://cds.climate.copernicus.eu) --
 # not configured in this environment. See that module's docstring.
@@ -14,7 +20,9 @@ cdsapi>=0.7.0
 xarray>=2023.1.0
 netCDF4>=1.6.0
 
-# Optional: lets scripts/validate_credentials.py and any future script read
-# credentials from a local .env file instead of requiring them to be
-# exported in the shell. See .env.example.
+# Optional (soft-fails via try/except if missing) but strongly recommended:
+# lets scripts/validate_credentials.py AND src/api/main.py (POST /api/predict,
+# POST /api/live/fetch) read CDSE_CLIENT_ID/CDSE_CLIENT_SECRET/GFW_TOKEN from
+# a local .env file instead of requiring them to be exported in the shell
+# uvicorn is launched from. See .env.example.
 python-dotenv>=1.0.0

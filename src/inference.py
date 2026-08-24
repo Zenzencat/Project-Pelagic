@@ -24,12 +24,22 @@ def run_tiled_inference(model, norm, device, patch_size=256, threshold=0.5):
     their edges rather than real neighboring pixels. Tiling here reproduces that
     same context at inference time.
 
-    Assumes H and W are exact multiples of patch_size (true for all current
-    holdout/synthetic scenes: 2048x2048 and 512x512). A scene with a non-divisible
-    size would produce a ragged final row/column of undersized tiles and fail when
-    stacked into a batch tensor — not handled here.
+    H and W should normally be exact multiples of patch_size (true for all
+    current holdout/synthetic scenes: 2048x2048 and 512x512). For inputs that
+    aren't (live CDSE scenes are sized to a multiple by
+    src/data/cdse_fetch.py already, but this is a defensive fallback, not the
+    primary mechanism), this reflect-pads up to the next multiple before
+    tiling and crops back down to the original H, W before returning --
+    a no-op for already-aligned inputs, so holdout/synthetic/evaluate_holdout.py
+    behavior is unchanged.
     """
-    H, W, C = norm.shape
+    H0, W0, C = norm.shape
+    pad_h = (-H0) % patch_size
+    pad_w = (-W0) % patch_size
+    if pad_h or pad_w:
+        norm = np.pad(norm, ((0, pad_h), (0, pad_w), (0, 0)), mode="reflect")
+    H, W, _ = norm.shape
+
     patches = []
     coords = []
     for y in range(0, H, patch_size):
@@ -48,5 +58,6 @@ def run_tiled_inference(model, norm, device, patch_size=256, threshold=0.5):
     for p_idx, (y, x) in enumerate(coords):
         probs_full[y:y + patch_size, x:x + patch_size] = probs_tiles[p_idx]
 
+    probs_full = probs_full[:H0, :W0]
     preds_full = (probs_full > threshold).astype(np.uint8)
     return probs_full, preds_full

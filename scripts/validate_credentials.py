@@ -30,6 +30,9 @@ try:
 except ImportError:
     pass  # optional; user can export env vars directly instead
 
+# Add root folder to path so `src.*` imports work when run as a script.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 
 def check_cds():
     """
@@ -97,29 +100,44 @@ def check_cdse():
         print("[SKIP] CDSE: CDSE_CLIENT_ID / CDSE_CLIENT_SECRET not set in environment.")
         return None
 
+    from src.analysis.cdse_auth import get_cdse_token, CdseAuthError
+
+    try:
+        get_cdse_token(client_id, client_secret)
+        print("[PASS] CDSE: credentials work, obtained a real OAuth2 access token.")
+        return True
+    except CdseAuthError as e:
+        print(f"[FAIL] CDSE: {e}")
+        return False
+
+
+def check_gfw():
+    """
+    Validates the GFW API token against a real, minimal v3 endpoint (a single
+    dataset lookup -- a few hundred ms, no report/download data transfer). A
+    bad/expired token fails with 401, a good one returns the dataset's real
+    metadata.
+    """
+    token = os.environ.get("GFW_TOKEN")
+    if not token:
+        print("[SKIP] GFW: GFW_TOKEN not set in environment.")
+        return None
+
     import requests
 
-    token_url = (
-        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/"
-        "protocol/openid-connect/token"
-    )
     try:
-        r = requests.post(
-            token_url,
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "grant_type": "client_credentials",
-            },
+        r = requests.get(
+            "https://gateway.api.globalfishingwatch.org/v3/datasets/public-global-presence:latest",
+            headers={"Authorization": f"Bearer {token}"},
             timeout=15,
         )
-        if r.status_code == 200 and "access_token" in r.json():
-            print("[PASS] CDSE: credentials work, obtained a real OAuth2 access token.")
+        if r.status_code == 200:
+            print("[PASS] GFW: token works, fetched real dataset metadata (public-global-presence:latest).")
             return True
-        print(f"[FAIL] CDSE: HTTP {r.status_code} — {r.text[:300]}")
+        print(f"[FAIL] GFW: HTTP {r.status_code} — {r.text[:300]}")
         return False
     except Exception as e:
-        print(f"[FAIL] CDSE: {e}")
+        print(f"[FAIL] GFW: {e}")
         return False
 
 
@@ -128,13 +146,19 @@ def main():
     cds_result = check_cds()
     print()
     cdse_result = check_cdse()
+    print()
+    gfw_result = check_gfw()
 
     print("\n=== Summary ===")
-    for name, result in [("CDS (ERA5)", cds_result), ("CDSE (Sentinel-1)", cdse_result)]:
+    for name, result in [
+        ("CDS (ERA5)", cds_result),
+        ("CDSE (Sentinel-1)", cdse_result),
+        ("GFW (AIS attribution)", gfw_result),
+    ]:
         status = {True: "PASS", False: "FAIL", None: "SKIPPED (not configured)"}[result]
-        print(f"  {name:20s} {status}")
+        print(f"  {name:24s} {status}")
 
-    if cds_result is False or cdse_result is False:
+    if cds_result is False or cdse_result is False or gfw_result is False:
         sys.exit(1)
 
 

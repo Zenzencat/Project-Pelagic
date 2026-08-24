@@ -57,6 +57,14 @@ flag the discrepancy rather than silently repeating either figure.
 - **`frontend/src/App.jsx`'s slick-size badge ("ขนาดคราบ") is hardcoded fake
   data** (`8.5`/`14.5` km²) for every detection — not wired to the real
   geojson-derived area. Known, flagged, not yet fixed.
+- **Live mode exists alongside the 4 cached demo scenes**: `POST /api/live/fetch`
+  fetches a real Sentinel-1 scene from Copernicus Data Space Ecosystem (via
+  the Sentinel Hub Process API, not a raw SAFE download — see `docs/status.md`
+  Recent Resolution #9 for why) and attributes it to real nearby AIS vessels
+  via the Global Fishing Watch API (`src/analysis/gfw_client.py`). This
+  replaced the old hardcoded `mock_vessels` in `main.py`. Real `CDSE_CLIENT_ID`
+  / `CDSE_CLIENT_SECRET` / `GFW_TOKEN` credentials are configured in this
+  repo's `.env` and verified working — don't assume they're absent.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run

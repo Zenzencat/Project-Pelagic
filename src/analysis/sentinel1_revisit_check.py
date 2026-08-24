@@ -62,8 +62,11 @@ def search_same_track_passes(min_lat, max_lat, min_lon, max_lon, reference_date_
     scene's specific acquisition" -- used by the coverage pre-check since no
     reference date exists for this dataset.
 
-    Returns a list of dicts: [{"name", "start", "footprint"}, ...], real API
-    results, no auth needed for search.
+    Returns a list of dicts: [{"id", "name", "start", "end", "footprint"}, ...],
+    real API results, no auth needed for search. "id" is the OData product
+    UUID -- required to actually download a product (see src/data/cdse_fetch.py),
+    not needed by this module's own revisit-comparison use case, but harmless
+    to include for callers that reuse this search function for that purpose.
     """
     bbox_wkt = (
         f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
@@ -96,8 +99,10 @@ def search_same_track_passes(min_lat, max_lat, min_lon, max_lon, reference_date_
 
     return [
         {
+            "id": p["Id"],
             "name": p["Name"],
             "start": p["ContentDate"]["Start"],
+            "end": p["ContentDate"].get("End"),
             "footprint": p.get("Footprint"),
         }
         for p in data.get("value", [])

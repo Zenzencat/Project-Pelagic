@@ -48,6 +48,88 @@ function calcSlickAreaKm2(det) {
   return totalKm2;
 }
 
+// Honest reason text for the vessel_attribution_status the API now returns
+// instead of the old hardcoded mock_vessels (src/api/main.py /
+// src/analysis/gfw_client.py). Every status here is a real outcome of an
+// actual attempt (or a real reason one couldn't be attempted) -- never a
+// placeholder standing in for missing data.
+function vesselStatusMessage(det) {
+  switch (det?.vessel_attribution_status) {
+    case 'ok':
+      return null; // real vessels found -- the list below speaks for itself
+    case 'empty':
+      return `ไม่พบเรือในระยะ ${det.vessel_search_radius_km ?? '?'} กม. จากข้อมูล AIS จริง (Global Fishing Watch)`;
+    case 'skipped_no_credentials':
+      return 'ยังไม่ได้ตั้งค่า GFW API token (GFW_TOKEN) — ไม่สามารถระบุเรือใกล้เคียงได้';
+    case 'skipped_no_timestamp':
+      return 'ฉากนี้ไม่มีข้อมูลเวลาถ่ายภาพจริง จึงไม่สามารถค้นหาเรือ AIS ที่ตรงเวลาได้ (ใช้ได้เฉพาะฉากที่ดึงแบบ Live)';
+    case 'error':
+      return 'เกิดข้อผิดพลาดขณะค้นหาเรือจาก Global Fishing Watch API';
+    default:
+      return 'ยังไม่มีข้อมูลการระบุเรือใกล้เคียงสำหรับฉากนี้';
+  }
+}
+
+// GFW's Report API reports each vessel's position as its ~0.01deg grid-cell
+// center, not a precise ping (src/analysis/gfw_client.py) -- so a distance
+// smaller than that cell's real size (position_resolution_m) isn't a
+// meaningfully precise number, it just means "somewhere in this AIS grid
+// cell." Showing e.g. "0.0 กม." for that case implied false precision;
+// this shows the honest resolution instead.
+function formatVesselDistance(v) {
+  if (v.position_resolution_m && v.distance_meters < v.position_resolution_m) {
+    return `< ${(v.position_resolution_m / 1000).toFixed(1)} กม. (ระยะกริด AIS)`;
+  }
+  return `${(v.distance_meters / 1000).toFixed(1)} กม.`;
+}
+
+// Multiple distinct vessels can legitimately share the exact same reported
+// AIS position -- see formatVesselDistance above, same root cause. Drawn
+// as-is, co-located markers render exactly on top of each other on the
+// map (only the topmost is visible), which looked like "only 2 of 5
+// vessels shown." This spreads co-located vessels into a small ring around
+// their shared reported position purely for on-screen visibility -- the
+// real lat/lon/distance used everywhere else (list, tooltip text) are
+// never changed, only where the marker is drawn, and the tooltip discloses
+// the spread so it doesn't read as a more precise position than it is.
+function spreadColocatedVessels(vessels) {
+  const groups = new Map();
+  for (const v of vessels) {
+    const key = `${v.latitude.toFixed(6)},${v.longitude.toFixed(6)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(v);
+  }
+  const out = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push({ ...group[0], displayLat: group[0].latitude, displayLon: group[0].longitude, colocatedCount: 1 });
+      continue;
+    }
+    // Spread radius is a fraction of the real AIS grid-cell size, so the
+    // ring stays visually "at this cell" rather than implying a precise
+    // separate position for each vessel. Kept well under half the real
+    // grid step (position_resolution_m is the cell's diagonal, so the step
+    // between adjacent cell centers is roughly resM / sqrt(2)) -- at 0.35
+    // two adjacent grid cells' rings could reach far enough to overlap and
+    // hide a marker again (found by re-inspecting a real capture: two real
+    // groups one grid cell apart produced two points close enough to render
+    // as one dot), so this stays comfortably below that collision radius.
+    const resM = group[0].position_resolution_m || 1200;
+    const spreadDegLat = (resM * 0.15) / 111320;
+    group.forEach((v, i) => {
+      const theta = (2 * Math.PI * i) / group.length;
+      const lonScale = Math.cos((v.latitude * Math.PI) / 180) || 1;
+      out.push({
+        ...v,
+        displayLat: v.latitude + spreadDegLat * Math.sin(theta),
+        displayLon: v.longitude + (spreadDegLat / lonScale) * Math.cos(theta),
+        colocatedCount: group.length,
+      });
+    });
+  }
+  return out;
+}
+
 // Zero-confidence detections are the API's fallback placeholder square
 // (src/api/main.py draws a tiny mock polygon when the model finds no slick
 // pixels at all), not a real contour -- treat them as "no oil" rather than
@@ -109,6 +191,18 @@ export default function App() {
   
   // Notification Toast
   const [toastMessage, setToastMessage] = useState(null);
+
+  // Live Fetch panel state -- additive "live" mode alongside the 4 verified
+  // demo scenes (POST /api/live/fetch, src/api/main.py). Defaults are a
+  // real, verified-covered bbox/window (Singapore Strait, confirmed to have
+  // real Sentinel-1 GRD coverage) so the panel works out of the box rather
+  // than requiring the presenter to already know good coordinates.
+  const [liveBbox, setLiveBbox] = useState({ minLat: '1.10', minLon: '103.70', maxLat: '1.30', maxLon: '103.90' });
+  const [liveDateFrom, setLiveDateFrom] = useState('2026-08-05');
+  const [liveDateTo, setLiveDateTo] = useState('2026-08-15');
+  const [liveRadiusKm, setLiveRadiusKm] = useState('10');
+  const [liveFetching, setLiveFetching] = useState(false);
+  const [liveResult, setLiveResult] = useState(null); // {status, detail}
 
   // 1. Fetch detections history list on startup
   const fetchDetections = async (autoSelectId = null) => {
@@ -206,6 +300,43 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  // 4. Live Fetch -- real CDSE search + Sentinel Hub Process API fetch +
+  // inference + real GFW attribution (POST /api/live/fetch). Renders its own
+  // status envelope (OK/NOT_CONFIGURED/SKIPPED/ERROR) rather than routing
+  // through the generic `error` banner above, since NOT_CONFIGURED/SKIPPED
+  // are expected, honest outcomes here, not failures.
+  const handleLiveFetch = async () => {
+    setLiveFetching(true);
+    setLiveResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/live/fetch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          min_lat: parseFloat(liveBbox.minLat),
+          min_lon: parseFloat(liveBbox.minLon),
+          max_lat: parseFloat(liveBbox.maxLat),
+          max_lon: parseFloat(liveBbox.maxLon),
+          date_from: liveDateFrom,
+          date_to: liveDateTo,
+          radius_km: parseFloat(liveRadiusKm) || 10,
+        }),
+      });
+      const body = await res.json();
+      setLiveResult({ status: body.status, detail: body.detail });
+
+      if (body.status === 'OK' && body.detection) {
+        showToast('ดึงภาพดาวเทียมจริงและวิเคราะห์สำเร็จ! (Live Fetch complete)');
+        await fetchDetections(body.detection.id);
+      }
+    } catch (err) {
+      console.error(err);
+      setLiveResult({ status: 'ERROR', detail: err.message || 'Live fetch request failed.' });
+    } finally {
+      setLiveFetching(false);
+    }
+  };
+
   // Center coordinate helper
   const getMapCenter = () => {
     if (selectedDet) {
@@ -272,6 +403,66 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Live Fetch panel -- additive "live" mode alongside the 4 verified
+            demo scenes below (never modifies that flow). Real CDSE search +
+            fetch + inference + real GFW attribution via POST
+            /api/live/fetch; see src/data/cdse_fetch.py and
+            src/analysis/gfw_client.py. Renders the NOT_CONFIGURED/SKIPPED/
+            ERROR envelope as an inline banner instead of the generic error
+            panel above, since those are expected outcomes here (missing
+            credentials, no product for the chosen bbox/date), not crashes. */}
+        <div style={{ margin: '16px', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'rgba(6, 182, 212, 0.03)' }}>
+          <h3 style={{ fontSize: '0.8rem', fontWeight: 600, color: '#fff', marginBottom: '10px' }}>
+            ดึงภาพดาวเทียมจริง (Live Fetch — Sentinel-1 จริงผ่าน CDSE)
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+            <input type="number" step="0.01" placeholder="min_lat" value={liveBbox.minLat}
+              onChange={e => setLiveBbox({ ...liveBbox, minLat: e.target.value })}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+            <input type="number" step="0.01" placeholder="min_lon" value={liveBbox.minLon}
+              onChange={e => setLiveBbox({ ...liveBbox, minLon: e.target.value })}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+            <input type="number" step="0.01" placeholder="max_lat" value={liveBbox.maxLat}
+              onChange={e => setLiveBbox({ ...liveBbox, maxLat: e.target.value })}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+            <input type="number" step="0.01" placeholder="max_lon" value={liveBbox.maxLon}
+              onChange={e => setLiveBbox({ ...liveBbox, maxLon: e.target.value })}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '6px' }}>
+            <input type="date" value={liveDateFrom} onChange={e => setLiveDateFrom(e.target.value)}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+            <input type="date" value={liveDateTo} onChange={e => setLiveDateTo(e.target.value)}
+              style={{ fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>รัศมีค้นหาเรือ (km):</span>
+            <input type="number" step="1" min="1" value={liveRadiusKm} onChange={e => setLiveRadiusKm(e.target.value)}
+              style={{ width: '60px', fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
+          </div>
+          <button onClick={handleLiveFetch} disabled={liveFetching}
+            style={{
+              width: '100%', padding: '8px', borderRadius: '6px', border: 'none',
+              backgroundColor: liveFetching ? 'rgba(6, 182, 212, 0.3)' : 'var(--primary)',
+              color: '#fff', fontWeight: 600, fontSize: '0.78rem', cursor: liveFetching ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+            }}>
+            {liveFetching && <Loader2 size={14} className="animate-spin" />}
+            {liveFetching ? 'กำลังดึงและวิเคราะห์ภาพจริง...' : 'ดึงภาพจริง (Live Fetch)'}
+          </button>
+
+          {liveResult && (
+            <div style={{
+              marginTop: '10px', padding: '8px', borderRadius: '4px', fontSize: '0.72rem', lineHeight: 1.4,
+              border: '1px solid ' + (liveResult.status === 'OK' ? 'rgba(16, 185, 129, 0.3)' : liveResult.status === 'ERROR' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(245, 158, 11, 0.3)'),
+              backgroundColor: liveResult.status === 'OK' ? 'rgba(16, 185, 129, 0.08)' : liveResult.status === 'ERROR' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+              color: liveResult.status === 'OK' ? 'var(--success)' : liveResult.status === 'ERROR' ? 'var(--danger)' : 'var(--warning)'
+            }}>
+              <strong>{liveResult.status}</strong>{': '}{liveResult.detail}
+            </div>
+          )}
+        </div>
 
         {/* Demo Scene Selector -- fixed to the 4 verified oil-detection scenes only.
             Scene list + details panel share one scrollable region so any
@@ -362,6 +553,28 @@ export default function App() {
                   {selectedDet.bbox[0].toFixed(2)}N, {selectedDet.bbox[1].toFixed(2)}E
                 </span>
               </div>
+              {/* Real acquisition datetime -- only ever present for source
+                  == 'live' detections (POST /api/live/fetch), straight from
+                  CDSE's own catalog, never fabricated/defaulted. Cached
+                  holdout/synthetic scenes have no real timestamp to show
+                  (see docs/status.md) so this row simply doesn't render for
+                  them, rather than showing a blank/fake value. */}
+              {selectedDet.source === 'live' && selectedDet.acquisition_start_utc && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>เวลาถ่ายภาพจริง (Acquisition, UTC):</span>
+                  <span style={{ fontWeight: 500, fontSize: '0.72rem', fontFamily: 'monospace' }}>
+                    {selectedDet.acquisition_start_utc}
+                  </span>
+                </div>
+              )}
+              {selectedDet.source === 'live' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>แหล่งที่มา (Source):</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.72rem', color: 'var(--primary)' }}>
+                    LIVE — Sentinel-1 จริงผ่าน CDSE
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>จำนวนเรือบริเวณใกล้เคียง (AIS):</span>
                 <span style={{ fontWeight: 500, color: 'var(--warning)' }}>
@@ -369,18 +582,40 @@ export default function App() {
                 </span>
               </div>
               
-              {/* Vessels List inside details */}
+              {/* Vessels List inside details -- real GFW AIS candidates only
+                  (src/analysis/gfw_client.py), never the old mock_vessels.
+                  "candidate" wording matches the source data's own posture:
+                  nearby-in-space-and-time AIS presence, not a confirmed
+                  source of the slick. */}
               {selectedDet.nearby_vessels && selectedDet.nearby_vessels.length > 0 && (
                 <div style={{ marginTop: '8px', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-dark)' }}>
-                  <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>รายชื่อเรือเดินทะเล</p>
+                  <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>เรือใกล้เคียงที่เป็นไปได้ (Candidate Nearby Vessels — AIS จริงจาก GFW)</p>
                   {selectedDet.nearby_vessels.map(v => (
                     <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: '2px' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <Anchor size={10} color="var(--warning)" /> {v.vessel_name}
+                        <Anchor size={10} color="var(--warning)" /> {v.vessel_name || `MMSI ${v.mmsi}`}
                       </span>
-                      <span style={{ color: 'var(--text-muted)' }}>ห่าง {(v.distance_meters / 1000).toFixed(1)} กม.</span>
+                      <span style={{ color: 'var(--text-muted)' }}>ห่าง {formatVesselDistance(v)}</span>
                     </div>
                   ))}
+                  {/* Required GFW attribution (API Terms of Use, Section 3) --
+                      must be visible wherever GFW-derived vessel data is
+                      shown, not buried in a footer. Placed directly under
+                      the vessel list it attributes, not just once globally. */}
+                  <p style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-color)', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                    <a href="https://globalfishingwatch.org" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'underline' }}>
+                      Powered by Global Fishing Watch.
+                    </a>
+                  </p>
+                </div>
+              )}
+
+              {/* Honest empty-attribution state -- replaces what used to be
+                  a silent "0 ลำ" with no explanation. See
+                  vessel_attribution_status in src/api/database.py. */}
+              {vesselStatusMessage(selectedDet) && (
+                <div style={{ marginTop: '8px', padding: '8px', borderRadius: '4px', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', fontSize: '0.72rem', lineHeight: 1.4 }}>
+                  {vesselStatusMessage(selectedDet)}
                 </div>
               )}
             </div>
@@ -455,14 +690,18 @@ export default function App() {
                 })
               )}
 
-              {/* C. AIS Vessel Markers & Lines */}
-              {showAIS && selectedDet.nearby_vessels && selectedDet.nearby_vessels.map(v => {
+              {/* C. AIS Vessel Markers & Lines -- spreadColocatedVessels
+                  handles vessels that share an identical reported AIS
+                  position (see its own comment above): without it, those
+                  markers render exactly on top of each other and only the
+                  topmost is visible/clickable. */}
+              {showAIS && selectedDet.nearby_vessels && spreadColocatedVessels(selectedDet.nearby_vessels).map(v => {
                 const slickCenter = getMapCenter();
                 return (
                   <React.Fragment key={v.id}>
                     {/* Dashed line to centroid */}
-                    <Polyline 
-                      positions={[[v.latitude, v.longitude], slickCenter]}
+                    <Polyline
+                      positions={[[v.displayLat, v.displayLon], slickCenter]}
                       pathOptions={{
                         color: 'rgba(245, 158, 11, 0.4)',
                         weight: 1.5,
@@ -470,8 +709,8 @@ export default function App() {
                       }}
                     />
                     {/* Vessel point marker */}
-                    <CircleMarker 
-                      center={[v.latitude, v.longitude]}
+                    <CircleMarker
+                      center={[v.displayLat, v.displayLon]}
                       radius={6}
                       pathOptions={{
                         fillColor: '#f59e0b',
@@ -483,7 +722,10 @@ export default function App() {
                       {/* Standard tooltip */}
                       <div className="custom-ship-tooltip">
                         <b>เรือ: {v.vessel_name} (MMSI: {v.mmsi})</b><br />
-                        ห่าง: {(v.distance_meters / 1000).toFixed(1)} กม. (km)
+                        ห่าง: {formatVesselDistance(v)}
+                        {v.colocatedCount > 1 && (
+                          <><br /><span style={{ opacity: 0.8 }}>ตำแหน่งโดยประมาณ — {v.colocatedCount} ลำ ใช้กริด AIS เดียวกัน</span></>
+                        )}
                       </div>
                     </CircleMarker>
                   </React.Fragment>
@@ -530,6 +772,20 @@ export default function App() {
               />
             </label>
           </div>
+
+          {/* Required GFW attribution (API Terms of Use, Section 3), also
+              shown right on the map panel itself (not just the sidebar
+              details panel) since this is "wherever vessel/attribution
+              markers are rendered on the map" -- visible whenever the
+              currently-selected detection actually has real GFW vessel
+              markers on screen. */}
+          {showAIS && selectedDet && selectedDet.nearby_vessels && selectedDet.nearby_vessels.length > 0 && (
+            <p style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid var(--border-color)', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+              <a href="https://globalfishingwatch.org" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', textDecoration: 'underline' }}>
+                Powered by Global Fishing Watch.
+              </a>
+            </p>
+          )}
         </div>
 
       </div>
