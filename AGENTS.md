@@ -28,6 +28,7 @@ nearby AIS vessels rendered on a Leaflet map dashboard.
 | "What's the system architecture?" | [`docs/system_architecture.md`](docs/system_architecture.md) |
 | "What's the DB schema?" | [`docs/db_schema.md`](docs/db_schema.md) |
 | "What are the eval numbers?" | `docs/checkpoint_comparison_summary.{json,csv}`, `docs/holdout_per_scene_results.{json,csv}`, `docs/confusion_matrix_breakdown.{json,csv}`, `docs/region_coverage.{json,csv}` |
+| "What's the post-hoc lookalike filter and does it work?" | [`docs/status.md`](docs/status.md) Phases 1–4; `docs/phase4_confirm_*.{json,csv}` for the final holdout numbers; `src/analysis/lookalike_filter.py` for the code |
 
 ## Known trap: README vs. status.md disagree on one number
 
@@ -79,6 +80,26 @@ flag the discrepancy rather than silently repeating either figure.
   blocked on a real external gap: **this dataset has no acquisition
   timestamps anywhere**, confirmed against the Zenodo deposits directly.
   See status.md for full detail — don't re-investigate this from scratch.
+- **Post-hoc lookalike classifier (Phases 1–4, `src/analysis/lookalike_filter.py`)**:
+  a downstream Gradient Boosting classifier + U-Net-confidence gate that judges
+  each candidate detection oil-vs-lookalike. On the 30-scene holdout it fixes
+  the lookalike bucket (0→7 correct) but costs real oil detections (10→7
+  found) — **a net-negative trade for a spill detector, so it is NOT enabled
+  by default**. It exists only as an opt-in `apply_lookalike_filter` flag on
+  `POST /api/predict` (default `False` = byte-identical to before it existed).
+  An ESSD/PANGAEA external dataset was tried as a training source and
+  **explicitly rejected** — its texture signal is JPG-domain-specific and does
+  not transfer to this project's raw-dB SAR (status.md Phase 1). Don't retry
+  training on ESSD without reading that finding.
+- **`src/analysis/candidate_region_features.py`** is the single source of truth
+  for the GLCM/edge/shape feature definitions, shared by the feasibility-check
+  script, the ESSD script, and the live filter — mirror any change across all
+  callers (same discipline as `dataset.py` ↔ `train_kaggle.py`).
+- **`.joblib` classifiers trained on Kaggle may not unpickle locally**
+  (`ModuleNotFoundError: No module named '_loss'`) — an sklearn version skew,
+  not a corrupt file. Refit locally from
+  `output/lookalike_classifier_own_domain_features*.csv` + the saved train/val
+  split; reproduces the Kaggle AUC to within ~0.001 (status.md Phase 3).
 
 ## Conventions
 

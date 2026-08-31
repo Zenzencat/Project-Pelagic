@@ -27,11 +27,15 @@ Project-Pelagic/
 │   └── package.json
 ├── kaggle_kernel/        # Training script & metadata for Kaggle runner
 ├── kaggle_eval_kernel/   # Inference evaluation script for held-out test set
+├── kaggle_kernel_lookalike/ # Trains the post-hoc lookalike classifier (Kaggle T4)
 ├── src/                  # Core Python modules
 │   ├── api/              # FastAPI endpoints & SQLite database logic
+│   ├── analysis/         # Post-processing: contours, land mask, GFW vessels,
+│   │                     #   lookalike_filter.py (opt-in post-hoc filter)
 │   ├── data/             # Ingestion pipelines & dataset loaders
 │   ├── models/           # U-Net architecture definition
 │   ├── evaluate_holdout.py # Local holdout test evaluation script
+│   ├── evaluate_holdout_lookalike_filter.py # Holdout eval WITH the post-hoc filter
 │   ├── train.py          # Local training orchestrator loop
 │   └── verify_training.py # Verification harness for CPU training runs
 ├── requirements.txt      # Python dependencies list
@@ -189,3 +193,60 @@ Comparative 3-panel plots (SAR VV, Ground Truth, Prediction) are outputted to th
 ### Lookalike False Alarm Suppression Analysis
 * **Binary Metric Null Result**: Both models return `0.0000` for all lookalike metrics. This is because lookalike features (such as wind shadows and biogenic films) produce backscatter reduction signatures identical to oil slicks, causing U-Net to predict false positive pixels on every scene (binary score `0.0`).
 * **Continuous Pixel-Level Reduction**: Comparing the raw predicted positive pixel counts reveals that **U-Net v2 consistently reduced lookalike false positives by 10% to 45%** across all lookalike test scenes. For example, on `lookalike_00003`, false positive pixels dropped from `1,815` (v1) to `1,004` (v2). This confirms that hard-negative oversampling successfully regularized background predictions, even if it did not suppress them completely to zero.
+  *(Note: `docs/status.md` gives a more carefully verified framing of this metric — average false-positive area 41.3% → 37.5% of scene area. The 10–45% range describes spread across individual scenes, not the typical improvement.)*
+
+---
+
+## 🧪 Post-Hoc Lookalike Discrimination Filter (opt-in — Phases 1–4)
+
+A second-stage classifier that runs **after** the U-Net and decides whether each
+candidate detection is real oil or a lookalike, then either keeps or suppresses
+that detection. Full investigation log: `docs/status.md` (Phases 1–4).
+
+* **Model**: Gradient Boosting on 12 hand-crafted features — 11 shared
+  GLCM-texture / Canny-edge-density / shape-compactness features
+  (`src/analysis/candidate_region_features.py`) plus the U-Net's own mean
+  prediction confidence in the candidate region. Trained on the full real
+  training pool (1,200 oil + 685 lookalike scenes), **not** on `data/holdout/`.
+  Artifact: `checkpoints/lookalike_classifier_final.joblib` (the `_v1` /
+  `_v2_oversampled` / `_v3_confidence` files are kept for reproducibility).
+* **Confidence gate** (`GATE_THRESHOLD = 0.975`): when the U-Net is very
+  confident, its "oil" call is kept regardless of the classifier — real
+  lookalikes are sometimes also confidently (wrongly) flagged, so this is an
+  accepted trade, verified on the real 30-scene holdout:
+
+  | Category | Baseline (v2 U-Net) | With filter + gate |
+  |---|---|---|
+  | oil | 8 correct, 2 partial | 6 correct, 1 partial, 3 false-negative |
+  | no_oil | 7 correct, 3 false-positive | 7 correct, 3 false-positive (unchanged) |
+  | lookalike | 0 correct, 10 false-positive | 7 correct, 3 false-positive |
+
+* **NOT recommended for unconditional integration** and **not enabled anywhere
+  by default** — trading real oil false-negatives for lookalike fixes is not a
+  free win for a spill detector. It is wired into `/api/predict` as an opt-in
+  flag only:
+
+  ```jsonc
+  POST /api/predict  { "scene_id": "...", "apply_lookalike_filter": true }
+  // default false → response and behavior byte-identical to before this existed
+  ```
+  When enabled the response gains a `lookalike_filter` diagnostic block. The
+  flag is folded into the scene cache key so toggling it can't return a stale
+  row produced under the other setting.
+
+### Run the holdout evaluation
+
+```bash
+# Baseline filter, no confidence gate
+python src/evaluate_holdout_lookalike_filter.py
+
+# Final configuration: classifier + confidence gate (matches the table above)
+python src/evaluate_holdout_lookalike_filter.py --gate --gate-threshold 0.975
+```
+Per-scene results land in `docs/phase4_confirm_*.{json,csv}`.
+
+> **Gotcha**: `.joblib` classifiers trained on Kaggle may fail to unpickle
+> locally (`ModuleNotFoundError: No module named '_loss'`) due to an sklearn
+> version mismatch. Refit locally from `output/lookalike_classifier_own_domain_features*.csv`
+> + the saved train/val split if this happens (reproduces the Kaggle AUC to
+> within 0.001) — see `docs/status.md` Phase 3.
