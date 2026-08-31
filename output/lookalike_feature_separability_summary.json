@@ -1,0 +1,13 @@
+{
+  "n_scenes": 50,
+  "n_oil": 25,
+  "n_lookalike": 25,
+  "oil_candidate_vs_gt_iou_mean": 0.6707414807519909,
+  "pca_explained_variance": [
+    0.5660062348807586,
+    0.17618672374230956
+  ],
+  "silhouette_score": 0.13146500701683592,
+  "loo_logistic_regression_accuracy": 0.7,
+  "majority_class_baseline": 0.5
+}

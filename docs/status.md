@@ -279,6 +279,374 @@ Full source: `docs/confusion_matrix_breakdown.{json,csv}`.
 
 ---
 
+## New Capability Investigation: Post-Hoc Lookalike Classifier (Yang & Singha ESSD/PANGAEA dataset)
+
+Follow-on to Track D's post-hoc-stage recommendation above, prompted by a real labeled lookalike dataset becoming available (Yang & Singha 2025, ESSD, PANGAEA DOI `10.1594/PANGAEA.980773` — 2,290 look-alike/other patches + 3,225 oil-object patches, Sentinel-1, Eastern Mediterranean, 2019, JPG + Pascal VOC XML).
+
+### Phase -1: Kaggle API access — Resolved
+* **Status**: Credentials found and working, confirmed with a real API call, not just a version check.
+* `~/.kaggle/credentials.json` exists but is **not** the legacy `kaggle.json` (`username`+`key`) format documented in most tutorials — it's the newer OAuth-style credential set (`refresh_token`, `access_token`, `access_token_expiration`, `scopes`) that Kaggle's current CLI (`kaggle==2.2.4`) uses. Initially flagged as suspicious for that reason (unfamiliar format, an elevated-looking `resources.admin:*` scope, an `access_token_expiration` that read as already-past) — resolved by actually testing it rather than trusting the file's shape: `pip install kaggle && kaggle datasets list` authenticated successfully as `trongzen` and returned real, current dataset listings (including entries with `lastUpdated` timestamps matching today's date). No `KAGGLE_USERNAME`/`KAGGLE_KEY` env vars or `.env` entries exist or are needed — the CLI reads `credentials.json` directly.
+* No action needed from Zen; this blocks nothing.
+
+### Phase 0: Did the original training set contain lookalike-type examples? — Resolved
+* **Status**: Yes, in real and substantial quantity — this is a "saw it but didn't learn to distinguish it" problem, not a "never saw this pattern" one.
+* **685 distinct lookalike scenes** were part of the original 2,570-scene training set (Zenodo Part II, `Mask_lookalike`), confirmed three ways, not just cited from earlier documentation:
+  1. Locally: `data/raw/Mask_lookalike/` contains exactly 685 `.tif` files (matches the count already on record in Resolution #1 above); 5 spot-checked masks are all-zero (`nonzero_px = 0`), i.e. genuinely empty ground truth — consistent with "lookalike" meaning *no real oil, but a suspicious dark signature*.
+  2. The **actual v1/v2 Kaggle training run's own log** (`kaggle_output/project-pelagic-training.log`, real captured stdout from the live Kaggle job, not a rerun) shows a deliberate discrepancy check built into `kaggle_kernel/train_kaggle.py`: **681/685 Lookalike masks are byte-identical to No-Oil masks** (expected — both categories are blank ground truth), but a separate **image-level** hash check found **0 identical image files out of 685 compared** — i.e. the 685 lookalike *images* are genuinely distinct real scenes, not a mislabeled copy of the no_oil set. The script explicitly logs `"Kept 685 distinct Lookalike scenes"` and folds them into training (`Total distinct negative scenes: 1370`, `Train split: 2056 scenes`, `Val split: 514 scenes`).
+  3. This matches Resolution #4 (already on record): v2's training deliberately **oversampled lookalike background patches 2.5x relative to no_oil** (`prob=0.005` vs `0.002`) specifically as hard negatives — i.e. the training pipeline didn't just passively include lookalikes, it went out of its way to show the model more of them per epoch than plain open water.
+* **Why the model still fails 100% on holdout lookalikes despite this**: the most likely explanation, and one already on record in this doc's "Lookalike Analysis" section (line 246) from an earlier round, is that the U-Net only ever sees raw VV/VH SAR backscatter — and a real oil slick and a real lookalike (biogenic film, current front, low-wind patch, etc.) can produce **near-identical dark-patch backscatter signatures** in that same 2-channel input space. Oversampling more examples of a category doesn't help if the input representation itself doesn't carry the distinguishing signal — the model has nothing to learn to key on. This is a real, structural information-availability limit of SAR-only pixel input, not a training-recipe or data-quantity bug.
+* **Implication for this task's plan**: this raises the bar for Phase 1/2. A post-hoc classifier trained on **crops from the same raw dB SAR channels alone** risks hitting the identical wall the U-Net already hit on 685 real, deliberately-oversampled in-domain examples. The plan's emphasis on hand-crafted texture/shape features (GLCM stats, edge density, compactness) or an external signal (the ESSD dataset's different sensor-processing pipeline, or eventually wind/multi-temporal context) is the right instinct precisely because it's a different feature space, not just more of the same one. Proceeding to Phase 1 with this explicitly in mind rather than assuming more SAR examples alone would fix it.
+
+### Pre-Phase-1 feasibility gate: do hand-crafted texture/shape features separate oil from lookalike at all, on this project's own data? — Resolved: modest, real separation
+* **Status**: Done, per Zen's explicit instruction to test this *before* touching the ESSD/PANGAEA dataset — a fast, cheap go/no-go check, not a full Phase 1 build.
+* **Method** (`scripts/lookalike_feature_separability_check.py`): extracted candidate-region crops using the **real v2 checkpoint's own prediction** (`checkpoints/model_real_v2_best.pt`, via the exact production `preprocess_for_prediction` + `run_tiled_inference` path — not a heuristic stand-in), then computed GLCM texture (contrast, dissimilarity, homogeneity, energy, correlation, ASM), edge density (Canny), and shape/compactness (circularity, solidity, aspect ratio, bbox-fill-fraction) on each candidate's largest connected component. Deliberately did **not** use ground-truth masks to pick the crop — a real post-hoc classifier only ever sees the U-Net's own proposed region, and lookalike ground truth is blank by definition, so using GT to select the crop would have been circular.
+* **Data**: 50 real scenes, no ESSD data involved — 10 holdout oil + 10 holdout lookalike (fully local already) plus 15 oil + 15 lookalike sampled evenly across the real training pools (1200/685 scenes) and freshly downloaded from the exact Kaggle datasets `train_kaggle.py` itself trains on (`shuddhabrotabanerjee/oil-spill-dartis-part1`/`-part2`) — the local repo checkout only has masks for these, not images (see Phase 0 above), so this was a real, targeted download, not reuse of anything already present.
+* **Sanity check passed**: the real model's predicted region vs. ground truth on the 25 oil scenes averaged IoU 0.671 (median 0.705) — consistent with this project's already-documented reasonable oil-bucket performance, confirming the inference call in this script matches production rather than silently diverging.
+* **Real result — 8 of 11 features are individually statistically significant (Welch's t-test, p<0.05) between oil and lookalike**, with moderate effect sizes (|Cohen's d| 0.53–1.19): lookalike candidate regions are more solid/convex (`solidity` d=-0.82, p=0.0059) and fill more of their own bounding box (`blob_fill_fraction` d=-1.19, **p=0.0001**, the single strongest feature) than oil regions, which tend to be more elongated/irregular; oil regions also show higher GLCM contrast/dissimilarity and lower homogeneity/energy/correlation (rougher, more textured internally) than lookalikes' smoother texture. This lines up physically with oil often forming windswept/current-driven streaks with internal thickness variation, vs. many lookalike causes (biogenic slicks, low-wind zones, current fronts) producing more uniform, rounder patches — a real, sensible mechanism, not an arbitrary statistical artifact.
+* **Quantified separability, honestly modest, not clean**: 2D PCA (74.2% variance explained) gives a silhouette score of **0.131** (positive = real structure, but far from the >0.5 that would mean cleanly separated clusters — the PCA scatter plot shows real lean but heavy overlap, `output/lookalike_feature_separability_pca.png`). A leave-one-out logistic regression on the 11 features reaches **70% accuracy (n=50) vs. a 50% majority-class baseline** — a genuine 40% relative reduction in error, clearly better than chance, but nowhere near a solved problem on its own.
+* **Conclusion and decision**: this clears the bar Zen set ("if oil and lookalike separate even modestly, Phase 1 is worth the investment") — the signal is real (multiple significant features, physically sensible direction, 70% vs. 50% LOO accuracy) but modest (silhouette 0.131, heavy scatter overlap). **Recommendation: proceed to Phase 1**, with the honest expectation set going in that texture/shape features alone will likely land in a "meaningfully better than 0/10, not a full fix" range (rough extrapolation from 70% binary LOO accuracy on n=50 crops, not a promise) — and that ERA5 wind context (already scoped, currently blocked on missing acquisition timestamps, see above) remains a good complementary signal for a later round rather than a replacement, since wind-vs-damping physics is a genuinely different signal from shape/texture and could plausibly cover cases texture alone won't.
+* Raw outputs: `output/lookalike_feature_separability.csv` (per-scene feature table), `output/lookalike_feature_separability_pca.png` (plot), `output/lookalike_feature_separability_summary.json` (metrics). Reproducible via `python scripts/lookalike_feature_separability_check.py` (re-downloads the same 15+15 training-sample TIFFs to a local temp dir if not already present).
+* **Refactor note**: the GLCM/edge/compactness feature code was pulled out into `src/analysis/candidate_region_features.py` once Phase 1 needed the identical logic for a second, differently-formatted data source (ESSD/PANGAEA, below) — single source of truth so the two callers' feature definitions can't drift apart, mirroring this project's own existing `dataset.py`/`train_kaggle.py` precedent (Resolution #5). `lookalike_feature_separability_check.py` now imports from it; behavior unchanged (verified: the shared module's `glcm_features` computes over the whole crop exactly as the original inline version did — the original's `mask_crop` parameter was actually unused dead code despite its docstring claiming otherwise, a pre-existing minor doc/code mismatch this refactor incidentally fixed rather than introduced).
+
+## Phase 1: ESSD/PANGAEA data acquisition, domain alignment, and final dataset composition
+
+* **Status**: Done. Zen approved proceeding to Phase 1 after the pre-Phase-1 feasibility gate above showed modest, real separation.
+
+### Download
+* **Real, live external hiccup found and resolved — not a true outage**: individual-file downloads at `https://download.pangaea.de/dataset/980773/files/<name>` need no auth (bulk zip does, HTTP 401). An initial pass guessing the no-oil (`nc`/`nw`) filenames as the same short `<subset>-NNNN.jpg` form the oil (`oc`/`ow`) subset uses returned a clean, 100%-consistent HTTP 500 across every no-oil file tried and 100% success on every oil file tried — indistinguishable at first from a real, category-specific PANGAEA backend outage (its own error page even says "we are informed about this... come back later"). Re-derived the real filenames directly from the dataset's own tab-separated metadata export instead of guessing: no-oil patches use a longer `<subset>-NNNN-00-NNNNNN.jpg` form (they're indexed differently since, unlike oil patches, they carry no per-object annotation row to derive a short name from). The "outage" was a wrong filename, confirmed by immediately succeeding once corrected — logged here so a future session doesn't waste time treating this as a PANGAEA-side problem again.
+* **Full dataset downloaded, not a sample**: all **3,655 patches** — **1,365 oil** (`oc`=375 oil/coast + `ow`=990 oil/water, 3,225 individual oil objects across them) and **2,290 no-oil/look-alike** (`nc`=351 no-oil/coast + `nw`=1,939 no-oil/water) — plus all 1,365 oil XML (Pascal VOC) annotations (no-oil patches carry no XML — no object to annotate, the same "blank ground truth" shape as this project's own `Mask_lookalike`). 100% success, 0 failures, ~550MB total. `scripts/download_essd_pangaea.py`; raw files in `data/external/essd_pangaea/` (gitignored, matching `data/raw/`'s existing treatment of large downloaded data); patch-level index at `data/external/essd_pangaea/patch_index.csv`.
+
+### Domain alignment — addressed explicitly, per-finding, not glossed over
+* **Format gap**: ESSD patches are pre-normalized 8-bit single-channel (VV only — confirmed `<depth>1</depth>` in every XML) JPGs, 640x640, vs. this project's raw calibrated 2-channel (VV+VH) dB GeoTIFFs, 2048x2048. The per-image JPG normalization parameters aren't published or recoverable, so **pixel-value calibration between the two was ruled out as infeasible**, not attempted partially. Chose **feature-space alignment** instead (the approach flagged as the fallback in the original task framing): the exact same GLCM texture / Canny edge-density / shape-compactness pipeline (`src/analysis/candidate_region_features.py`) runs on both sources' candidate-region crops, since these are relative (percentile-clipped, locally quantized) measures by construction, not raw intensity comparisons.
+* **Candidate-region definition per source**:
+  - This project's own scenes: real v2 U-Net's own predicted mask (already-established method from the feasibility gate).
+  - ESSD oil (`oc`/`ow`): the dataset's own VOC bounding box, refined by a **local** Otsu threshold within (bbox + 15px margin) to recover an actual blob shape rather than a bare rectangle — verified directly on a real sample (`ow-0001`): local Otsu found a 1,080px blob vs. the annotated bbox's own 1,058px area (kept within ~2%), whereas a *global*, whole-640x640-image Otsu on the same patch produced a useless 73,132px blob covering 42% of the frame — the same "global threshold is too coarse, must be localized" failure mode already discovered on this project's own raw scenes, confirmed a second time on a completely different data source.
+  - ESSD no-oil (`nc`/`nw`): no bounding box exists (a look-alike patch has no annotated object, by definition) — darkest-10th-percentile threshold + morphological cleanup + largest connected component, applied to the **whole patch** (no bbox prior to localize with). **1,365/1,365 (100%) of oil patches yielded a usable candidate**; **1,479/2,290 (64.6%) of no-oil patches did** — the remaining 811 (35.4%) had no dark blob clearing the minimum-area threshold anywhere in the patch, meaning their look-alike signature isn't a single localized dark blob at that threshold (a real, disclosed limitation of this simple detector, not silently dropped — the skip count is in `data/external/essd_pangaea/essd_extraction_summary.json`). Final ESSD feature table: **2,844 patches** (1,365 oil + 1,479 no-oil), `data/external/essd_pangaea/essd_features.csv`.
+* **Real cross-domain finding, reported honestly rather than cherry-picked**: re-ran the same per-feature Cohen's d / Welch's t-test analysis from the feasibility gate on the much larger ESSD-only sample (n=2,844, vs. n=50 before) — **one feature (`circularity`) is directionally consistent with the small project-own-data result** (oil less circular/more irregular than lookalike in both: d=-0.563 here vs. d=-0.531 there), which is reassuring, a real signal that survives a much bigger, differently-formatted sample. **But several GLCM texture features flip sign between the two domains**: e.g. `glcm_contrast` is higher for oil than lookalike in this project's own data (d=+0.630, oil rougher) but *lower* for oil than no-oil in ESSD (d=-0.169, oil smoother) — same for `glcm_homogeneity`/`dissimilarity`. Most likely cause: JPG contrast-stretch normalization alters *relative* texture statistics differently than physical dB scaling does, compounded by ESSD's own oil-vs-no-oil candidate-region methodology asymmetry (tight annotated-bbox-guided crop for oil vs. looser whole-patch threshold for no-oil) being a genuine confound in ESSD's own feature values, separate from the true physical oil/lookalike distinction. **This is exactly the generalization risk the original task asked to flag, not paper over** — it's real and it showed up in the data, not just a theoretical worry about region/year mismatch.
+* **Mitigation applied for Phase 2**: per-source z-score standardization (standardize each domain's own features to its own mean/std *before* pooling) rather than pooling raw feature values directly. This doesn't force artificial agreement — a sign-inconsistent feature (like the GLCM ones above) still won't help a pooled linear classifier after standardization, since its within-class mean difference points opposite ways in the two domains and will net toward zero-ish combined signal; a sign-consistent feature (like `circularity`) keeps its usable signal. Verified this is what actually happens, not just a plausible-sounding claim: pooled (n=2,894: 1,390 oil + 1,504 no-oil, this project's own 30 feasibility-gate scenes + ESSD's 2,844) 2D-PCA silhouette is **0.029** — close to ESSD-alone's own **0.030** (barely moved by pooling), both lower than the small-sample project-own-data figure (0.131, likely inflated some by small-n noise) but still positive, i.e. real, non-random structure survives pooling, just weaker than either the optimistic small-n estimate or a naive (non-standardized) pooling would suggest. Plot: `output/essd_plus_own_pooled_pca.png`.
+
+### Final prepared dataset composition, going into Phase 2
+| Source | Role | Oil / positive | No-oil / lookalike | Notes |
+|---|---|---|---|---|
+| ESSD/PANGAEA | Training (out-of-domain, large N) | 1,365 patches | 1,479 patches (811 skipped, no localized blob) | JPG, single region/year (E. Med, 2019), feature-space-aligned via shared extraction code |
+| This project's own training pool | Training (in-domain, small N so far) | 15 scenes sampled (of 1,200 available) | 15 scenes sampled (of 685 available) | Raw dB GeoTIFF, real v2-model candidate regions; more available on-demand directly from the Kaggle-hosted training datasets during Phase 2's Kaggle run, not locally download-limited |
+| This project's own 30-scene holdout | **Evaluation only — Phase 3, never training** | 10 scenes | 10 lookalike + 10 no_oil scenes | Explicitly held out from every step above (Phase 0's feasibility-gate script used these read-only for the go/no-go check, not for fitting anything) — Phase 2 must not touch these during training or model/threshold selection, only Phase 3's final report may |
+
+* **Leakage note, stated explicitly since Phase 2 is next**: the pre-Phase-1 feasibility check computed features on the 10 holdout lookalike + 10 holdout oil scenes, but only to answer "does this feature space separate at all" — no classifier was fit on them and none of their features were used as classifier training/validation data. Phase 2 must draw its training pool only from ESSD + this project's own **training**-set scenes (never `data/holdout/`), so Phase 3's evaluation stays honest.
+
+### Post-Phase-1 correction: ESSD's signal does NOT transfer to this project's own data — reverses the plan to train primarily on ESSD
+* **Status**: Critical follow-up finding, prompted by Zen questioning the pooled PCA plot directly ("the 'own' points all sit inside the main overlapping cluster, none reach the separated region that's mostly ESSD oil triangles"). That visual read was correct and led to a decisive, negative result — reported in full rather than downplayed, since it changes the Phase 2 plan materially.
+* **Diagnostic 1 — is "own" separable at all inside the shared/pooled feature space, or only in isolation?** Split the earlier pooled analysis strictly into the legitimate 30-scene own **training pool** (15 oil + 15 lookalike, `source=="train_sample"`) vs. the 20-scene own **holdout** (kept as a read-only diagnostic exactly as the feasibility gate already used it, not used to tune or select anything here either):
+  - Own-training-pool-only silhouette, own's own PCA axes: **0.172** (consistent with the earlier ~0.13 estimate — real, if modest, self-contained separation).
+  - Own-training-pool silhouette evaluated on the **shared** pooled PCA axes (fit on own+ESSD together), but scored using only own points as each other's neighbors: **0.174** — essentially unchanged. So own's oil and own's lookalike genuinely separate from *each other* along the shared axes; that part isn't the problem.
+  - **The actual problem**: re-scored the same shared-space points but let ESSD points count as neighbors too (the real, honest pooled-silhouette computation) — own's per-point silhouette **collapses to 0.007** (ESSD's own subset stays at 0.030, matching the previously-reported pooled figure almost exactly, since ESSD's 2,844 points numerically dominate the average). In plain terms: own's oil and lookalike points *are* separated from each other, but neither group is cleanly separated from ESSD's *opposite*-class cloud — exactly the "own points sit inside the big overlapping middle mass, not out near ESSD's separated oil region" pattern Zen spotted in the plot.
+* **Diagnostic 2 — the decisive test: does a classifier trained only on ESSD generalize to this project's own data at all?** Fit a logistic regression on ESSD alone (n=2,844, per-domain-standardized as already documented), predicted on own data it never saw during fitting:
+  - **Own training pool (n=30): 40.0% accuracy — *below* the 50% majority baseline.**
+  - **Own holdout (n=20, read-only diagnostic): 55.0% accuracy — indistinguishable from chance at this sample size** (confusion matrix: 7/10 lookalike scenes misclassified as oil, 8/10 oil scenes correctly classified — the classifier is mostly just predicting "oil" regardless of input, not discriminating).
+* **Conclusion: confirmed, not just theorized — an ESSD-only-trained classifier does not transfer to this project's own SAR data.** This validates Zen's stated concern directly: the modest oil-vs-no-oil signal ESSD's texture/shape features carry (Phase 1's 75.7% 5-fold CV accuracy, reported above) is substantially **ESSD-JPG-domain-specific**, most likely explained by the GLCM sign-flip already found and documented above, compounded by ESSD's own internal oil-vs-no-oil candidate-region-methodology asymmetry (bbox-guided crop for oil vs. whole-patch threshold for no-oil) — a confound in ESSD's own labels, not a property of real oil-vs-lookalike physics that would carry over to a different sensor-processing pipeline.
+* **Revised plan for Phase 2, before writing any training code**: do **not** train the classifier primarily on ESSD and hope it transfers. Instead:
+  1. **This project's own training pool is the primary signal**, and it is not actually small in absolute terms — 685 lookalike + 1,200 oil scenes are available (only 15+15 sampled locally so far for speed; Phase 2's Kaggle run can draw the full pool directly from the already-mounted `oil-spill-dartis-part1`/`-part2` datasets with no extra local download). The feasibility gate already showed this domain alone reaches 70% LOO accuracy (n=50, mixing train+holdout in that read-only check) — real, own-domain-consistent signal, unlike ESSD's.
+  2. **ESSD's role, if any, should be narrowed** to the one feature that was directionally consistent across both domains (`circularity`) rather than the full feature vector, or dropped from training entirely and kept only as a documented negative result in this file. Default going in: exclude ESSD from Phase 2's actual training data, re-derive a larger own-domain training sample instead, and revisit ESSD only if the larger own-only sample turns out insufficient.
+* This is exactly the kind of finding the original task asked to surface honestly rather than paper over ("if it doesn't improve meaningfully, report that too, with the most likely reason why") — surfacing it now, before Phase 2 training rather than after, saves training a classifier on the wrong primary data source.
+
+---
+
+## Phase 2: Build and train the classifier — Done, on the revised (own-data-only) basis
+
+* **Status**: Trained on Kaggle T4, real run (not estimated). Zen approved proceeding on the revised basis after the ESSD non-transfer finding above.
+* **Data**: excluded ESSD entirely, per the revised plan. Used the **full** real training pool this time, not the 15+15 sample from the feasibility gate — **all 1,200 oil scenes (Part I) + all 685 lookalike scenes (Part II)**, the same Kaggle-hosted `oil-spill-dartis-part1`/`-part2` datasets `train_kaggle.py` itself trains the U-Net on, pulled directly on the Kaggle kernel (no local download needed). `data/holdout/` was never referenced anywhere in this kernel — confirmed by reading the script, not just by intent.
+* **Real infrastructure hiccups hit and fixed while getting this running** (documented since they cost real debugging time, not swept under the rug):
+  1. First run failed immediately (`FileNotFoundError` on `model_real_v2_best.pt`) — the `trongzen/project-pelagic-model-best` Kaggle dataset had just been updated with the v2 checkpoint (it previously only had v1) and was still mid-processing ("Dataset version is being created") when the kernel launched. Confirmed `ready` via `kaggle datasets status` and re-ran.
+  2. Second run failed the same way even with the dataset confirmed ready — the actual `/kaggle/input` mount path has since drifted from the flat `/kaggle/input/<dataset-slug>/...` convention `train_kaggle.py` and this file's first draft both hardcoded (now `/kaggle/input/datasets/<owner>/<slug>/...`, an extra `datasets/` segment). `kaggle_eval_kernel/eval_kaggle.py` had already independently hit and fixed this exact issue with a recursive `os.walk` search instead of a hardcoded path — applied the same fix here (`find_dir_with_tifs()`), for both the model checkpoint and the Part I/II data directories, rather than hardcoding a path that had already proven to drift once.
+  3. Fetching Kaggle kernel logs from this Windows environment via the `kaggle` CLI crashes (`UnicodeEncodeError`, Windows' default `cp1252` console/file encoding choking on a UTF-8 character in the log) — worked around by calling the underlying `kaggle` Python API directly and writing the log with explicit `encoding='utf-8'`. Noted here in case a future session hits the same CLI crash and wastes time treating it as a Kaggle-side problem.
+* **Real run, full pool**: 1,885 scene pairs total. Candidate-region extraction (same method as the feasibility gate: real v2-model prediction, largest connected component) succeeded on **100% of oil scenes (1,200/1,200)** and **95.9% of lookalike scenes (657/685, 28 skipped — the model correctly predicted nothing at all on those 28 training-distribution lookalikes)** — 1,857 total usable examples, a large, real, own-domain-only dataset (37x the feasibility gate's n=50). Feature extraction ran ~49 minutes on the T4 (~1.5s/scene, most of it U-Net inference + GLCM computation, not GPU-bound).
+* **Scene-level stratified 80/20 split** (`sklearn.train_test_split`, `random_state=42`): 1,485 train (960 oil, 525 lookalike) / 372 val (240 oil, 132 lookalike). Split scene IDs saved (`output/lookalike_classifier_train_val_split.json`) so this can be audited later.
+* **Three lightweight classifiers compared** (per-domain feature standardization fit on train only, applied to val):
+
+  | Model | Val accuracy | Precision | Recall | F1 | AUC |
+  |---|:---:|:---:|:---:|:---:|:---:|
+  | Logistic Regression | 0.839 | 0.844 | 0.921 | 0.880 | 0.907 |
+  | Random Forest | 0.844 | 0.832 | 0.950 | 0.887 | 0.915 |
+  | **Gradient Boosting (selected)** | **0.847** | 0.865 | 0.904 | 0.884 | **0.934** |
+
+  Gradient Boosting's val confusion matrix (rows=true lookalike/oil, cols=predicted lookalike/oil): `[[98, 34], [23, 217]]` — 98/132 lookalike scenes correctly flagged (74.2% specificity), 217/240 oil scenes correctly kept (90.4% recall). This is genuinely strong, own-domain, held-out validation performance — a real jump from the feasibility gate's n=50 LOO estimate (70% accuracy), consistent with having ~37x more training data and the full real class distribution rather than a small even sample.
+* **Saved artifacts**: `checkpoints/lookalike_classifier_v1.joblib` (the trained Gradient Boosting model + its `StandardScaler` + the exact `FEATURE_COLUMNS` order, everything needed to run it), `output/lookalike_classifier_own_domain_features.csv` (all 1,857 scenes' features), `output/lookalike_classifier_results.json`, `output/lookalike_classifier_train_val_split.json`. Kernel: `kaggle_kernel_lookalike/train_lookalike_classifier.py` (single-file, synced-with-`src/` convention matching `train_kaggle.py`'s own precedent), pushed as `trongzen/project-pelagic-lookalike-classifier`.
+* **Caveat going into Phase 3, stated plainly**: this 84.7%/AUC 0.934 number is validation performance on scenes drawn from the **same training-pool distribution** the classifier was fit on (held-out scenes, no leakage within that pool, but still the same underlying data source as training). It is not yet evidence of holdout performance — the 30-scene holdout spans 6 real-world regions this training pool's regional composition is unverified against (Zenodo's Part I/II scenes don't carry the same confirmed embedded georeferencing the holdout scenes do, per earlier rounds' region-coverage work). Phase 3 is the real test.
+
+---
+
+## Phase 3: Real holdout evaluation — mixed result, NOT recommended for integration as-is
+
+* **Status**: Done. Real, honest numbers below — not rounded up, not cherry-picked (single deterministic run; the classifier and U-Net are both non-stochastic at inference time).
+* **Method** (`src/evaluate_holdout_lookalike_filter.py`): runs the real v2 U-Net over all 30 holdout scenes (same tiled-inference path as `compare_checkpoints.py`, same "before" outcome bucketing already used for `docs/confusion_matrix_breakdown.json`, confirmed to reproduce it exactly: oil 8 correct/2 partial, no_oil 7 correct/3 false_positive, lookalike 0 correct/10 false_positive). For each scene, extracts the same candidate-region features Phase 2 trained on (largest connected component of the U-Net's own prediction) and applies the trained classifier: a "lookalike" verdict suppresses the entire predicted mask (scene becomes a null detection); an "oil" verdict leaves the prediction untouched; a scene with no candidate region at all (prediction already empty) passes through unfiltered.
+* **Real infrastructure snag, fixed cleanly**: the Kaggle-trained `checkpoints/lookalike_classifier_v1.joblib` (Gradient Boosting) failed to unpickle locally (`ModuleNotFoundError: No module named '_loss'`) — a real sklearn-version incompatibility between the Kaggle kernel's environment and this local venv, not a corrupted file. Fixed by refitting all three candidate classifiers **locally**, from the already-downloaded feature CSV and the exact same saved train/val scene-ID split (`output/lookalike_classifier_train_val_split.json`) — reproduced the Kaggle run's numbers almost exactly (e.g. Gradient Boosting AUC 0.9335 locally vs. 0.9339 on Kaggle), confirming this is the same model on the same data, not a different fit.
+
+### The result
+| Category | Before (n=10 each) | After |
+|---|---|---|
+| **oil** | 8 correct, 2 partial | **2 correct, 1 partial, 7 false_negative** |
+| **no_oil** | 7 correct, 3 false_positive | 7 correct, 3 false_positive (unchanged) |
+| **lookalike** | 0 correct, 10 false_positive | **8 correct, 2 false_positive** |
+
+* **The lookalike bucket improved dramatically**: 0/10 → 8/10 correct — the post-hoc filter genuinely works on 8 of the 10 real holdout lookalike scenes it was built to fix.
+* **The oil bucket regressed badly, and this is disqualifying, not a minor side effect**: 8 correct/2 partial (10/10 "found the real oil" in some form) collapsed to 2 correct/1 partial/**7 false_negative** — 7 real oil detections the U-Net got right were then thrown away by the classifier calling them "lookalike." `no_oil` is unaffected either way (every no_oil scene's prediction was either already empty or too fragmented to clear the candidate-region size threshold, so the classifier never got a chance to touch it, for better or worse).
+* **Not a threshold-tuning problem — checked directly, not assumed**: pulled the classifier's raw P(oil) for every oil-bucket scene. 5 of the 7 wrongly-suppressed oil scenes are *confidently* wrong (P(oil) = 0.034–0.089, 0.294), not borderline; only 2 (`oil_00004` at 0.467, `oil_00009` at 0.436) sit near the 0.5 boundary. Moving the decision threshold would rescue at most those 2 without addressing the other 5 — this is a real feature-space misclassification, not a miscalibrated cutoff. Likewise, the 2 lookalike scenes that still slip through are confidently (not borderline) misclassified as oil (P(oil)=0.93, 0.95) — genuinely hard cases from the classifier's own perspective, not near-misses either.
+* **Most likely reason, consistent with everything else this investigation found**: the classifier trained well on the full 1,200-oil-scene training pool (84.7% val accuracy, AUC 0.934 — Phase 2's numbers were real, not wrong) but that training pool's shape/texture characteristics for the *oil* class apparently don't fully represent the specific oil scenes in this diverse, 6-region holdout set — the same region-generalization risk flagged as a concern for the ESSD data in Phase 1 turns out to also apply, to a real and costly degree, to this project's own training-pool-vs-holdout gap for the oil class specifically (interesting that it does *not* show up as a problem for the lookalike class, which generalized well from training pool to holdout).
+* **Conclusion, plainly**: **not recommended for integration as currently built.** The lookalike-bucket win is real and worth keeping as a documented result, but trading 7 real oil false-negatives for 8 fixed lookalike false-positives is not an acceptable net swap for an oil-spill detection tool, where missing a real spill is the worse failure mode. Phase 4 (additive/toggleable integration) should not proceed on this classifier as-is — per the original task's own gate ("Do NOT integrate into the main live pipeline until Phase 3's result is reviewed and approved"), and this result does not clear that bar.
+* Full per-scene results: `docs/phase3_holdout_with_filter_results.{json,csv}`, category summary: `docs/phase3_holdout_with_filter_summary.json`.
+
+---
+
+## Phase 3.5: Region-correlation diagnostic on the 7 misclassified oil scenes — hypothesis NOT supported, in an interesting way
+
+* **Status**: Data analysis only, per Zen's explicit instruction — no retraining, no code changes to the classifier. Findings below, stopped for review as asked.
+* **Question**: does the training pool's regional composition explain why the classifier wrongly suppresses 7/10 real holdout oil detections — specifically, do the 7 misclassified scenes cluster in the holdout's already-known *weak* regions (Red Sea/Gulf of Mexico/Baltic/Western Med, per the existing region-accuracy table), or are they spread more broadly?
+
+### Finding 1: the 7 misclassified scenes cluster in the *strongest* region, not the weak ones — the opposite of the hypothesis
+Cross-referenced each oil scene's classifier verdict (`docs/phase3_holdout_with_filter_results.json`) against its real region (`docs/region_coverage.json`, from embedded GeoTIFF coordinates):
+
+| Region | Oil scenes (n) | Misclassified as lookalike |
+|---|:---:|:---:|
+| Eastern Mediterranean | 7 | **6/7 (85.7%)** |
+| Red Sea | 3 | 1/3 (33.3%) |
+
+All 7 misclassified scenes: `oil_00000, oil_00001, oil_00004, oil_00005, oil_00006, oil_00008 (Red Sea), oil_00009` — six of the seven are Eastern Mediterranean, the region with this project's *best* documented baseline U-Net pass rate (11/15 across all categories). The two Red Sea scenes the classifier actually got right (`oil_00002`, `oil_00003`) are from the same region as `oil_00008`, the one Red Sea scene it got wrong — so it's not a clean regional split either; Red Sea itself is mixed (2 correct, 1 wrong). Gulf of Mexico, Baltic Sea, and Western Mediterranean have **zero** oil-category holdout scenes at all (per `region_coverage.json`, that table's "0/2", "0/1", "0/2" entries were for the U-Net's baseline all-category pass rate, not oil specifically — this bucket only has Eastern Med and Red Sea oil scenes to begin with), so those regions can't be evaluated for this specific question. **The hypothesis as stated — misclassification concentrated in historically weak regions — is not supported by the data.** If anything the opposite pattern shows up (worse on the strong region), though n=7 is too small to call that a confirmed inverse relationship rather than noise.
+
+### Finding 2: the training pool is NOT narrowly Eastern-Mediterranean — an earlier assumption in this doc was wrong, corrected here
+Phase 2's write-up above stated training scenes "don't carry the same confirmed embedded georeferencing the holdout scenes do" — **checked directly this round and that's incorrect**. Training GeoTIFFs (Zenodo Part I/II) carry a `ModelTransformationTag` (a full affine matrix — the *other* standard GeoTIFF georeferencing convention, vs. holdout scenes' `ModelTiepointTag`+`ModelPixelScaleTag` pair, which is why the same `get_scene_geolocation()` used for holdout scenes silently doesn't apply and likely fed the wrong assumption). Real coordinates recovered directly from a systematic sample (every ~80th of the 1,200 oil scenes, every ~45th of the 685 lookalike scenes — n=15+15, ~1-2% of each pool, evenly spaced not cherry-picked):
+
+| Sample | Real-world location found |
+|---|---|
+| oil scenes | North Sea (55.2N, 4.1E); **Gulf of Mexico / Bay of Campeche (6 of 15 samples** — 19-28N, -89 to -95W); Black Sea (43.7N, 35.7E); Levantine Mediterranean edge (33.4N, 33.2E; 33.4N, 30.0E — near but south of the holdout's stated 34-37N Eastern Med box); Portugal Atlantic coast (35.1N, -8.8W) |
+| lookalike scenes | North Sea (54.6N, 3.5E); Sicilian Strait (37.1N, 13.7E); Persian Gulf / Strait of Hormuz (24.7N, 54.6E; 26.1N, 56.0E); North Sea/Scotland (59.1N, -1.6E; 58.5N, -2.1E); Persian Gulf (28.3N, 48.6E); Trinidad/Caribbean (10.6N, -61.5W); Gulf of Mexico (29.0N, -90.6W; 28.4N, -89.6W; 28.9N, -89.4W; 18.9N, -91.4W; 19.4N, -90.7W); Sea of Japan/Korea Strait (34.6N, 131.3E); Sinai/Eastern Med edge (31.5N, 33.2E) |
+
+The training pool is genuinely global — North Sea, Black Sea, Persian Gulf, Trinidad, Japan/Korea Strait, Portugal, and (heavily) Gulf of Mexico all show up in a small systematic sample, alongside a few scenes near but not matching the holdout's specific Eastern Med bounding box. **This directly contradicts the "training pool lacks holdout's regional diversity" framing** — if anything, the training pool appears *more* geographically diverse than the holdout's curated 6 regions, not less. Gulf of Mexico in particular is well-represented in training (6/15 oil samples, 5/15 lookalike samples) despite being one of the holdout's documented weak regions for the base U-Net.
+
+### Revised interpretation
+A simple "training pool doesn't cover the holdout's regions" story doesn't hold up — the training pool already spans more of the globe than the holdout does. The concentration of misclassifications in Eastern Mediterranean oil scenes specifically is real (Finding 1), but its likely cause is probably not raw geographic coverage. A quick supplementary check (candidate-region features for all 10 oil holdout scenes, same read-only extraction as Phase 3, no retraining) shows a mixed picture rather than one clean rule: some misclassified scenes (`oil_00000`: solidity 0.776, fill-fraction 0.482; `oil_00005`: solidity 0.793, fill-fraction 0.605) have shape stats that sit much closer to the lookalike class's typical profile (Phase 2's training data: lookalike mean solidity 0.692, fill-fraction 0.490 vs. oil mean 0.570/0.271) — plausibly genuinely oil-slick-shaped in a way that happens to look "lookalike-shaped" by these metrics. Others (`oil_00001`: solidity 0.460, fill-fraction 0.246 — both already oil-typical) don't fit that story at all and were still misclassified, meaning the Gradient Boosting model's decision isn't reducible to one or two features either. **Not chasing this further per Zen's explicit "don't retrain yet" instruction** — flagging it as the most concrete lead for a future round (e.g., a smaller, geographically-blind ablation, or inspecting which of the 11 features the model actually weights most heavily for these specific scenes) rather than concluding it here.
+* Reproducible via the same feature-extraction call already in `src/evaluate_holdout_lookalike_filter.py`; no new script needed for this diagnostic beyond one-off analysis in this session (not saved as a script since it was exploratory cross-referencing of already-produced files, not a new pipeline stage).
+
+---
+
+## Phase 3.6: Full feature-vector inspection of the 7 misclassified oil scenes — two distinct, real causes found; no extraction bug
+
+* **Status**: Data analysis only, per Zen's explicit instruction — no retraining. Full feature vectors, importance-weighted attribution, training-pool rarity check, and direct visual inspection below.
+* **Method**: pulled all 11 features for all 10 oil holdout scenes (not just the 7 misclassified — kept the 3 correct ones as a comparison group), computed each feature's z-score against the training pool's oil-class and lookalike-class mean/std (`output/lookalike_classifier_own_domain_features.csv`, n=1,857), and weighted each feature's "pull toward lookalike" (`|z_oil| − |z_lookalike|`, positive = closer to the lookalike distribution) by the trained Gradient Boosting model's own `feature_importances_` — so the ranking reflects what the model actually relies on, not an arbitrary feature list. Model's real global importances: **`blob_fill_fraction` (0.362) and `glcm_correlation` (0.203) alone account for 56% of total importance**; `aspect_ratio` (0.156) and `circularity` (0.098) most of the rest; the remaining 7 GLCM/edge features sum to under 15%.
+
+### Two distinct groups, two distinct causes — not one single bug
+
+**Group A — `oil_00000`, `oil_00004`, `oil_00005`, `oil_00006`: genuinely massive, scene-spanning real slicks, rare in training**
+* In every one of these 4 scenes, `blob_fill_fraction` is the dominant driver by a wide margin (importance-weighted pull +0.47 to +0.63 — 5-10x the next-largest feature for the same scene). Their candidate blob's bounding box is `(0,0,2048,2048)` or nearly the full frame for all four.
+* **Checked directly, not assumed, whether this is a real slick or a detection artifact**: `blob_vs_gt_iou` for these four is 0.78–0.97 — the candidate blob closely tracks the real ground-truth mask, which is *also* enormous (`oil_00000`: 2,015,200 GT px = 48% of the scene; `oil_00005`: 2,527,264 px = 60%). **Visually confirmed too** (`output/phase3_6_diagnostic/oil_candidate_regions_overview.png`): the candidate-blob row and ground-truth row are near-identical sprawling shapes for all four — real, large, amoeba-like slicks, not noise or a broken threshold.
+* **The actual mechanism, quantified**: a blob this large, relative to its own tight bounding box, naturally has a much higher fill-fraction than a small localized detection. Checked how common this scale is in the 1,200-scene oil training pool: **only 18/1,200 (1.5%) have a candidate blob over 1,000,000 px, and only 1.75% have fill-fraction over 0.6** — the exact scale these 4 holdout scenes sit at is genuinely rare in what the classifier learned from. This is a real, boring, fixable-in-principle explanation for this group: not enough large-scale training examples for the model to have learned "huge real slicks can still be legitimately oil," not a bug in the pipeline.
+
+**Group B — `oil_00001`, `oil_00008`, `oil_00009`: already oil-typical on shape, pulled wrong by texture (`glcm_correlation`) — genuinely ambiguous, not one clean cause**
+* These 3 do **not** show the Group A pattern (`blob_fill_fraction` is a minor or even oil-favoring factor for them). Instead `glcm_correlation` dominates in every case (weighted pull +0.20 to +0.67).
+* **`oil_00001` is a distinct sub-case**: its `glcm_correlation` (0.900) is an extreme *positive* outlier vs. the oil training mean (0.627±0.058, z=+4.71) — an unusually smooth, coherent texture patch, atypical even for oil. Visually it's a genuinely thin, elongated streak (aspect_ratio 5.06, the highest of all 10 scenes) — a real, distinctively-shaped detection the classifier hasn't seen much of either.
+* **`oil_00008`/`oil_00009` share their pattern with two of the three *correctly*-classified scenes**: `oil_00002` and `oil_00003` (both Red Sea, both correct) also have `glcm_correlation` as their #1 lookalike-pulling feature (weighted pull +0.31, +0.09) — low correlation relative to the oil mean is evidently common across several Red-Sea/Levant-area oil scenes generally, correctly-classified ones included. What separates `oil_00008`/`oil_00009` (wrong) from `oil_00002`/`oil_00003` (right) is the *cumulative* pull across their top 4 features (0.35–0.38 vs. 0.09–0.13), not one single feature being uniquely broken. **This is a genuinely ambiguous feature-space overlap for these 3 scenes** — a legitimate finding, not a failure to find a cause.
+* **Visually confirmed no extraction bug here either**: `oil_00001`'s thin streak and `oil_00008`/`oil_00009`'s fragmented, multi-lobed blobs both closely track their own ground truth in the same overview plot.
+
+### The "boring explanation" check — ruled out
+Directly inspected the candidate-region crop, blob mask, and ground-truth mask side-by-side for **all 10** oil holdout scenes (not just the 7), not just their summary statistics. Every candidate blob's shape closely matches its own ground truth, for both the misclassified and correctly-classified scenes alike. **No corrupted, mismatched, or degenerate candidate-region extraction was found anywhere in the oil bucket.** The 7 failures are real feature-space/model-decision issues, not a data pipeline bug.
+
+### Summary
+| Scene | Region | Top driver | Real cause |
+|---|---|---|---|
+| oil_00000 | E. Med | blob_fill_fraction (+0.53) | massive real slick, rare training scale |
+| oil_00004 | E. Med | blob_fill_fraction (+0.53) | massive real slick, rare training scale |
+| oil_00005 | E. Med | blob_fill_fraction (+0.63) | massive real slick, rare training scale |
+| oil_00006 | E. Med | blob_fill_fraction (+0.47) | massive real slick, rare training scale |
+| oil_00001 | E. Med | glcm_correlation (+0.67) | extreme texture/shape outlier (thin streak) |
+| oil_00008 | Red Sea | glcm_correlation (+0.28) | ambiguous, shared pattern with correct Red Sea scenes |
+| oil_00009 | E. Med | glcm_correlation (+0.20) | ambiguous, shared pattern with correct Red Sea scenes |
+
+This also sharpens Phase 3.5's regional finding: it was never really about "Eastern Mediterranean" as a region — it's that 5 of the 6 misclassified Eastern Med scenes belong to the two identified mechanisms above (scale rarity or texture-outlier/ambiguity), which happen to concentrate in this holdout's Eastern Med scenes largely by coincidence of which real slicks were included, not because of anything specific to that region.
+* Outputs: `output/phase3_6_diagnostic/oil_holdout_full_features.json` (full feature vectors + blob/GT IoU for all 10 oil scenes), `output/phase3_6_diagnostic/oil_candidate_regions_overview.png` (visual check), `output/phase3_6_diagnostic/*_crop.npz` (raw crop/blob/GT arrays per scene).
+* **Not retrained, per Zen's instruction.** Stopping here for review.
+
+---
+
+## Phase 3.7: Oversample large-blob training examples — validation improved, holdout unchanged (the fix didn't transfer)
+
+* **Status**: Done. Honest result: **the targeted fix worked exactly as intended within the training pool, but did not transfer to the actual holdout scenes it was meant to fix.**
+* **Method**: identified the 18 training-pool oil scenes with `blob_area_px > 1,000,000` (Phase 3.6's threshold), split 12 train / 6 val by the existing scene-level split. Swept oversampling factors 1x/3x/4x/5x/8x (duplicating only the 12 train-side examples, val left untouched) and picked by validation performance before touching the holdout at all, per the task's instruction:
+
+  | Factor | Val accuracy | Precision | Recall | F1 | AUC |
+  |---|:---:|:---:|:---:|:---:|:---:|
+  | 1x (baseline) | 0.847 | 0.865 | 0.904 | 0.884 | 0.934 |
+  | 3x | 0.860 | 0.873 | 0.917 | 0.894 | 0.935 |
+  | **4x (selected)** | **0.868** | 0.869 | 0.938 | 0.902 | **0.936** |
+  | 5x | 0.860 | 0.862 | 0.933 | 0.896 | 0.935 |
+  | 8x | 0.863 | 0.862 | 0.938 | 0.898 | 0.931 |
+
+  4x improved every metric with no sign of overfitting (8x's slightly lower AUC hints at where over-oversampling would start to hurt) — a modest, well-justified choice, not the most aggressive option. Saved as `checkpoints/lookalike_classifier_v2_oversampled.joblib`.
+* **Confirmed the oversampling worked as intended on the training pool's own distribution**: checked the 6 large-blob oil examples held out in the *validation* split specifically (never oversampled, never trained on) — **5 of 6 moved toward correctly-classified-as-oil** (e.g. `oil_00057.tif`: P(oil) 0.082→0.256; `oil_00932.tif`: 0.310→0.391), 1 of 6 moved the other way. So the intervention is real and measurable, not a no-op — it does teach the model to weigh large-fill-fraction candidates more toward "oil" in general.
+
+### The real holdout re-run: bucket-level result is byte-for-byte identical to Phase 3
+| Category | Phase 3 (before) | Phase 3.7 (after oversampling) |
+|---|---|---|
+| oil | 2 correct, 1 partial, 7 false_negative | **2 correct, 1 partial, 7 false_negative — unchanged** |
+| no_oil | 7 correct, 3 false_positive | 7 correct, 3 false_positive — unchanged (no no_oil scene ever reaches the classifier, same as before) |
+| lookalike | 8 correct, 2 false_positive | 8 correct, 2 false_positive — unchanged, same 2 scenes (`lookalike_00003`, `lookalike_00007`) still slip through |
+
+* **Group A (`oil_00000`, `oil_00004`, `oil_00005`, `oil_00006`) — did NOT flip back, and mostly got *more* confidently wrong**, not less:
+
+  | Scene | Before P(oil) | After P(oil) | Direction |
+  |---|:---:|:---:|---|
+  | oil_00000 | 0.089 | 0.021 | worse |
+  | oil_00004 | 0.467 | 0.363 | worse |
+  | oil_00005 | 0.079 | 0.034 | worse |
+  | oil_00006 | 0.034 | 0.039 | ~unchanged |
+
+  This is the opposite of what the training-pool validation result predicted. The fix generalizes to *more of the training pool's own* large-blob examples (5/6 held-out ones improved) but not to these specific 4 holdout scenes — a genuine, still-unresolved train-vs-holdout gap, not something this intervention could reach.
+* **Group B (`oil_00001`, `oil_00008`, `oil_00009`) — as expected, not this fix's target, and indeed unchanged in outcome, but interesting movement**: `oil_00008` (0.294→0.482) and `oil_00009` (0.436→0.490) both moved substantially closer to the 0.5 boundary — nearly flipping — while `oil_00001` barely moved (0.052→0.079). None crossed the threshold, so the bucket table is unchanged, but `oil_00008`/`oil_00009` are now genuinely close calls rather than confident misses.
+* **Lookalike bucket held, as asked**: still 8/10 correct, the same 2 false positives — oversampling large *oil* examples did not make the classifier more lenient toward real lookalikes slipping through as oil.
+* **no_oil bucket, verified unchanged**: identical, as expected — every no_oil scene's candidate is either already empty or too fragmented to reach the classifier at all (`no_candidate` verdict in both runs), so this bucket structurally cannot be affected by any change to the classifier itself.
+
+### Conclusion
+A real, honestly negative result for the stated goal: **the training-data-scarcity fix for Group A is confirmed correct as far as it goes (it measurably helps the model on more of the training pool's own large-blob examples) but does not close the gap for the 4 specific holdout scenes it targeted** — those scenes apparently differ from the training pool's large-blob examples in some way beyond raw scale/fill-fraction that this intervention doesn't address. Net holdout outcome is unchanged from Phase 3: still not recommended for integration. `output/lookalike_classifier_v2_oversampled_val_results.json`, `docs/phase3_7_holdout_oversampled_results.{json,csv}`, `docs/phase3_7_holdout_oversampled_summary.json`.
+
+---
+
+## Phase 3.8, Task A: Size-based safety rule for Group A — NOT feasible, ruled out with real numbers
+
+* **Status**: Checked, rule **not proposed for implementation** — real lookalikes reach the same scale as Group A's oil scenes, in both the training pool and the holdout itself.
+* **Question**: is there a `blob_fill_fraction` (or scale) threshold above which "lookalike" could be safely overridden back to "oil" as a hard post-classifier rule, given Group A's 4 oil scenes sit at fill-fraction 0.44–0.61?
+* **Training pool check**: the 657 usable training lookalike examples reach fill-fraction up to **0.999** (mean 0.471, essentially the same mean as Group A's oil scenes) — the top 10 highest-fill-fraction training lookalike examples are all at 0.999+, with `blob_area_px` up to 4,194,304 (literally the entire 2048×2048 scene). Real lookalikes routinely span the whole frame.
+* **Holdout check (the real target)**: extracted the same feature for all 10 holdout lookalike scenes directly (not assumed) — `lookalike_00000` reaches fill-fraction **0.8275**, `lookalike_00001` reaches **0.8254**, `lookalike_00006` reaches **0.6615** — all three exceed every one of Group A's 4 oil scenes (max 0.605), and `lookalike_00000`/`00005`/`00006`/`00008` all have the identical `(0,0,2048,2048)` whole-scene bbox Group A's oil scenes have.
+* **Conclusion, per the task's explicit instruction to report honestly if this happens**: there is no clean separation. Real lookalikes — in training and in this exact holdout — reach equal or higher scale/fill-fraction than the 4 oil scenes a size-based rule would be trying to rescue. Any fill-fraction threshold high enough to leave real lookalikes alone would also fail to catch Group A; any threshold low enough to catch Group A would flip several genuine holdout lookalikes (at minimum `lookalike_00000`, `lookalike_00001`, `lookalike_00006`) into false positives — undoing Phase 3's actual win. **Not implemented, as instructed.**
+* Data: `output/phase3_6_diagnostic/holdout_lookalike_full_features.json` (new, this round), training-pool lookalike stats computed directly from `output/lookalike_classifier_own_domain_features.csv`.
+
+---
+
+## Phase 3.8, Task B: Add U-Net confidence as a feature — real, if partial, improvement
+
+* **Status**: Done. **This is the first intervention that actually rescues a holdout scene without any lookalike regression** — a genuine, if modest, net improvement over Phase 3's baseline filter.
+* **New feature**: `mean_unet_confidence` — the U-Net's own mean sigmoid probability (continuous, not thresholded) within the candidate blob's pixels. Added to the shared feature-extraction pipeline as an own-domain-only addition (kept separate from `src/analysis/candidate_region_features.py`'s `FEATURE_COLUMNS`, since ESSD patches have no U-Net probability to draw from — see that module's updated docstring reasoning applied the same way in `kaggle_kernel_lookalike/train_lookalike_classifier.py`). Required a full re-run of feature extraction over all 1,885 training scenes (the binary mask alone, already saved from Phase 2, isn't enough — needed the continuous probability array) — real Kaggle T4 run, ~59 minutes, same 1,857/1,885 keep rate as Phase 2 (reproducible: identical skip counts).
+* **Validation check first, per the task's instruction** (same train/val split as Phase 2, Gradient Boosting selected again by val AUC):
+
+  | Metric | Phase 2 (11 features) | Phase 3.8 (12 features, +confidence) |
+  |---|:---:|:---:|
+  | Val accuracy | 0.847 | **0.879** |
+  | Val precision | 0.865 | **0.901** |
+  | Val recall | 0.904 | 0.913 |
+  | Val F1 | 0.884 | **0.907** |
+  | Val AUC | 0.934 | **0.947** |
+
+  Real improvement across the board, no regression on the validation check — cleared the gate to proceed to the holdout. `mean_unet_confidence` came in as the model's **2nd-most-important feature (20.0%)**, behind only `blob_fill_fraction` (32.0%) and ahead of `glcm_correlation` (16.2%) — a real, load-bearing signal, not a token addition.
+
+### The real holdout re-run
+| Category | Phase 3 baseline (before any filter) | Phase 3/3.7 (with filter, no confidence feature) | **Phase 3.8 (with confidence feature)** |
+|---|---|---|---|
+| oil | 8 correct, 2 partial | 2 correct, 1 partial, 7 false_negative | **3 correct, 1 partial, 6 false_negative** |
+| no_oil | 7 correct, 3 false_positive | 7 correct, 3 false_positive | 7 correct, 3 false_positive — unchanged |
+| lookalike | 0 correct, 10 false_positive | 8 correct, 2 false_positive | **8 correct, 2 false_positive — unchanged, same 2 scenes** |
+
+Full three-way P(oil) comparison, since the picture is more nuanced than a single before/after:
+
+| Scene | Phase 3 baseline | Phase 3.7 (oversampled) | Phase 3.8 (+confidence) |
+|---|:---:|:---:|:---:|
+| oil_00000 (Group A) | 0.089 | 0.021 | 0.042 |
+| oil_00001 (Group B) | 0.052 | 0.079 | **0.188** |
+| oil_00004 (Group A) | 0.467 | 0.363 | 0.176 |
+| oil_00005 (Group A) | 0.079 | 0.034 | 0.056 |
+| oil_00006 (Group A) | 0.034 | 0.040 | 0.010 |
+| oil_00008 (Group B) | 0.294 | 0.482 | 0.358 |
+| oil_00009 (Group B) | 0.436 | 0.490 | **0.633** |
+
+* **`oil_00009` (Group B) flipped from misclassified to correct** — and not a borderline flip: P(oil) reached **0.633**, a real, non-marginal swing past the boundary.
+* **`oil_00001` (Group B) moved consistently toward correct across both interventions** (0.052 → 0.079 → 0.188) but still short of 0.5.
+* **`oil_00008` (Group B) is not monotonic** — oversampling (Phase 3.7) pushed it up to 0.482 (just short of flipping), but adding the confidence feature pulled it back down to 0.358. The two interventions don't compose cleanly; this scene's outcome depends on which fix is applied, not a strictly additive improvement.
+* **Group A is still not fixed, and not uniformly**: `oil_00000`/`oil_00006` stayed roughly flat (confidently wrong throughout), `oil_00005` ticked slightly worse, and `oil_00004` kept getting *more* confidently wrong across both interventions (0.467 → 0.363 → 0.176) — consistent with Task A's finding that these scenes are genuinely hard to separate from real lookalikes on the features available, not something either fix reaches.
+* **Lookalike bucket held exactly**, same 2 false positives (`lookalike_00003`, `lookalike_00007`) as every prior round — adding U-Net confidence did not make the classifier more lenient toward real lookalikes.
+* **no_oil bucket verified unchanged** — structurally unaffected, as in every prior round (no no_oil candidate ever reaches the classifier).
+
+### Conclusion
+The best-performing configuration found across every intervention this investigation has tried (Phase 3 baseline filter, Phase 3.7 oversampling, this round): **oil bucket 3 correct/1 partial/6 false_negative**, still far below the pre-filter baseline (8 correct/2 partial) and still net-negative overall (trading 6 real oil misses for 8 fixed lookalike false-positives remains an unfavorable swap for an oil-spill detector), but the first change to actually move a real number in the right direction without giving anything back elsewhere. Saved: `checkpoints/lookalike_classifier_v3_confidence.joblib`, `output/lookalike_classifier_v3_confidence_val_results.json`, `docs/phase3_8_holdout_confidence_results.{json,csv}`, `docs/phase3_8_holdout_confidence_summary.json`. Still not recommended for integration as-is — the oil-bucket regression remains too large — but this is now the strongest basis for a future round to build on.
+
+---
+
+## Phase 3.9: Confidence-gated classifier application — no safe threshold exists, confirmed with real numbers (including a direct counter-example)
+
+* **Status**: Done. **The premise doesn't hold**: U-Net confidence and correctness are only weakly related in this domain — the model is routinely very confident *and wrong* on real lookalikes, which is the entire reason this post-hoc classifier project exists. Reported honestly per the pattern already established for Task A above, with the full requested sweep run anyway so the tradeoff is quantified, not just asserted.
+
+### Distribution overlap — training pool
+| | n | mean | median | p90 | p95 | max |
+|---|---:|---:|---:|---:|---:|---:|
+| oil | 1,200 | 0.922 | 0.926 | 0.958 | 0.966 | 0.984 |
+| lookalike | 657 | 0.902 | 0.905 | 0.975 | 0.985 | **0.994** |
+
+Means are nearly identical (0.922 vs 0.902); lookalike's own *upper* tail actually exceeds oil's. **52.2% of all training lookalike examples (343/657) have U-Net confidence above 0.9**, and even **2.7% (18 examples) exceed 0.99** — the U-Net isn't just occasionally overconfident on lookalikes, it's confident on them more often than not.
+
+### Distribution overlap — holdout (the real target, and where the clearest counter-example lives)
+| Scene | Confidence | | Scene | Confidence |
+|---|:---:|---|---|:---:|
+| oil_00000 (Group A) | 0.978 | | lookalike_00000 | 0.971 |
+| oil_00004 (Group A) | 0.967 | | **lookalike_00001** | **0.980** |
+| oil_00005 (Group A) | 0.985 | | lookalike_00002 | 0.951 |
+| oil_00006 (Group A) | 0.977 | | lookalike_00005 | 0.959 |
+| oil_00003 (correct) | 0.966 | | lookalike_00006 | 0.974 |
+
+**`lookalike_00001` — a real, confirmed-false lookalike detection — has the single highest U-Net confidence (0.980) of all 20 oil+lookalike holdout scenes combined, exceeding every one of Group A's 4 "confidently real oil" scenes except `oil_00005`.** This is a direct, concrete answer to the task's question: yes, the U-Net is sometimes very confident and very wrong on lookalikes, in this exact holdout, not just hypothetically in the training pool.
+
+### Validation sweep (per the task's instruction, checked before touching holdout)
+Simulated the gate on the held-out validation split: gated examples (confidence above threshold) are forced to "oil" regardless of the classifier; others use the classifier's real verdict.
+
+| Threshold | Oil examples gated | Lookalike examples wrongly gated to "oil" | Net correct (with gate) | Net correct (classifier only) |
+|---|---:|---:|---:|---:|
+| 0.90 | 183 | 73 | 281 | **327** |
+| 0.95 | 42 | 35 | 301 | **327** |
+| 0.97 | 10 | 20 | 312 | **327** |
+| 0.99 | 0 | 5 | 322 | **327** |
+| 0.995 | 0 | 0 | 327 | 327 |
+
+**Gating is strictly worse than the classifier alone at every threshold tested on validation** — there is no point where gating helps overall accuracy; it only ever adds false "oil" calls on lookalike examples that the classifier was already getting right.
+
+### The real holdout run anyway, full threshold sweep (gate = keep U-Net's raw call above threshold, else use Phase 3.8's classifier verdict; no_oil bucket untouched in every case, as always)
+| Threshold | Oil bucket | Lookalike bucket |
+|---|---|---|
+| 0.90 | 8 correct, 2 partial | 1 correct, 9 false_positive |
+| 0.95 | 7 correct, 1 partial, 2 false_negative | 3 correct, 7 false_positive |
+| 0.97 | 6 correct, 1 partial, 3 false_negative | 5 correct, 5 false_positive |
+| **0.975** | **6 correct, 1 partial, 3 false_negative** | **7 correct, 3 false_positive** |
+| **0.98** | **4 correct, 1 partial, 5 false_negative** | **8 correct, 2 false_positive (unchanged)** |
+| 0.99 (no gate fires) | 3 correct, 1 partial, 6 false_negative | 8 correct, 2 false_positive |
+
+**The exact mechanism the task asked about, confirmed on real data**: at threshold 0.975, 3 of Group A's 4 scenes get protected (`oil_00000`=0.978, `oil_00005`=0.985, `oil_00006`=0.977 all clear it) — but `lookalike_00001` (0.980) *also* clears it, flipping from correctly-classified back to a false positive. There is no threshold that protects those 3 oil scenes without also admitting that one lookalike: `lookalike_00001`'s confidence (0.980) is mathematically higher than 2 of the 3 oil scenes the gate would need to protect, so any threshold low enough to catch them is low enough to catch it too.
+* **Two genuinely different real operating points, not a single answer** — presented for a decision, not decided here:
+  - **Threshold ≈0.975**: oil bucket improves from 3→**6** correct (nearly matching the original 8-correct pre-filter baseline), lookalike bucket costs 1 (8→**7** correct). A real trade: 3 oil scenes rescued for 1 lookalike false-positive reintroduced.
+  - **Threshold ≈0.98**: oil bucket improves from 3→**4** correct, lookalike bucket **unchanged at 8**. A smaller, "free" gain with zero cost.
+* **This is a genuine value judgment, not a technical one** — given this investigation's own repeated framing that missing real oil is the worse failure mode for a spill detector, 0.975's trade could be read as favorable; but it does concretely give back some of Phase 3's lookalike win to get there, and that's a call for Zen, not something to decide unilaterally.
+* Not implemented as a change to any saved artifact yet — this is a reported finding with real numbers on both sides, per the task's framing. Data: `output/phase3_6_diagnostic/holdout_confidence_all.json` (new, this round).
+
+---
+
+## Phase 4: Final configuration implemented, saved, and wired in as additive/toggleable — NOT enabled by default
+
+* **Status**: Done. Zen accepted Phase 3.9's oil-vs-lookalike trade; this round turns it into real, saved, callable code rather than a notebook simulation.
+* **Final artifact**: `checkpoints/lookalike_classifier_final.joblib` (the Phase 3.8 Gradient Boosting classifier, 12 features including `mean_unet_confidence`) — a plain copy of `lookalike_classifier_v3_confidence.joblib` under its canonical final name; the versioned files (`_v1`, `_v2_oversampled`, `_v3_confidence`) are kept alongside it, not deleted, so every prior round's exact artifact stays reproducible.
+* **Real code, not a simulation**: new `src/analysis/lookalike_filter.py` —
+  - `GATE_THRESHOLD = 0.975`, the exact value swept and reported in Phase 3.9 (the range that reproduces that exact result is `[0.974, 0.977)` — 0.975 sits inside it, not a rounded stand-in for a more precise number that was never actually computed differently).
+  - `apply_confidence_gate(mean_unet_confidence, classifier_verdict, threshold=GATE_THRESHOLD)` — the gate rule itself, as a real function.
+  - `classify_and_filter(image_raw, probs_full, pred_mask, ...)` — the full pipeline: candidate-region extraction (reusing `src/analysis/candidate_region_features.py`, unchanged), `mean_unet_confidence` computation, classifier prediction, gate application, and the filtered mask + a diagnostic dict (`applied`, `verdict`, `gated`, `proba_oil`, `mean_unet_confidence`, `reason`).
+* **`src/evaluate_holdout_lookalike_filter.py` refactored to call this real module** (previously it duplicated the classifier-prediction logic inline) — the confirmation run below therefore exercises the *actual* saved code path, not a re-implementation of it. Also gained `--gate`/`--gate-threshold` flags (default off) so both configurations are reproducible from the same script.
+* **Final confirmation run, exact match, no discrepancy**:
+
+  | Category | No gate (`--out-prefix phase4_confirm_nogate`) | **With gate** (`--out-prefix phase4_confirm_gated`, threshold 0.975) |
+  |---|---|---|
+  | oil | 3 correct, 1 partial, 6 false_negative (reproduces Phase 3.8 exactly) | **6 correct, 1 partial, 3 false_negative** |
+  | no_oil | 7 correct, 3 false_positive | 7 correct, 3 false_positive — unchanged |
+  | lookalike | 8 correct, 2 false_positive (reproduces Phase 3.8 exactly) | **7 correct, 3 false_positive** |
+
+  Matches Phase 3.9's simulated prediction exactly: **oil 6/10 correct, lookalike 7/10 correct, no_oil unchanged at 7/10** — confirmed which scenes moved, too: `oil_00000`/`oil_00005`/`oil_00006` (all Group A) get gated (`mean_unet_confidence` 0.978/0.985/0.977, all clear 0.975) and kept as oil; `lookalike_00001` (0.980) also clears the gate and is the one new false positive, exactly as identified in Phase 3.9. No unexpected discrepancy to report.
+* **Wired into `/api/predict` as additive/toggleable, not a silent replacement**: `PredictRequest` gained `apply_lookalike_filter: bool = False`. When unset or `False` (every existing caller, including the 4 verified cached demo scenes and anything that predates this field), the code path is **byte-for-byte identical** to before this round — `classify_and_filter()` is never even called. Only when a caller explicitly passes `apply_lookalike_filter: true` does the filter run, and the response gains an extra `lookalike_filter` diagnostic key.
+* **Cache-safety, a real risk that was caught and fixed before it could bite**: `/api/predict`'s existing scene_id cache (keyed by `checkpoint_hash`, added in an earlier round to invalidate stale rows on checkpoint swap) would otherwise let a `apply_lookalike_filter=True` call silently return a stale *unfiltered* cached row (or vice versa) for a scene_id already predicted once. Fixed by folding the filter setting into the cache key (`effective_hash = CHECKPOINT_HASH + "+lookalike_filter"` when enabled) — reuses the exact same "hash mismatch → overwrite in place" logic already proven for checkpoint swaps, rather than adding new cache logic.
+* **Verified end-to-end against the real running app, not just unit-level**: backed up `data/pelagic.db` first, then via `fastapi.testclient.TestClient` against a **non-demo** holdout scene (`lookalike_00002`, deliberately not one of the 4 verified demo scenes) — confirmed (a) default and explicit-`False` calls return identical results, (b) `apply_lookalike_filter=True` correctly suppresses the detection (this scene is a real lookalike; classifier verdict `lookalike`, not gated, `proba_oil=0.074`) and returns the diagnostic info, (c) toggling back to default afterward correctly reverts to the original unfiltered result (cache invalidation works in both directions, not just one). Restored `data/pelagic.db` from the backup afterward — `git status`/`git diff` on that file show **zero net change**.
+* **`/api/live/fetch` and the 4 cached demo scenes: untouched**, per the explicit instruction — no code in the live-fetch endpoint was modified this round, and the verification above deliberately used a non-demo scene precisely to avoid writing anything new under any of the 4 demo scene_ids.
+* **Not enabled by default anywhere.** This is a real, tested, available capability — not yet a decision to change what the live app shows. Turning it on for the actual demo/live paths (if ever desired) would be a separate, explicit future decision, not something this round did silently.
+
+---
+
 ## Open Issues
 
 ### 1. `run_full_preprocessing()` has no dB/linear-scale branching — found this session

@@ -1,0 +1,35 @@
+{
+  "oil": {
+    "before": {
+      "correct": 8,
+      "partial": 2
+    },
+    "after": {
+      "correct": 6,
+      "false_negative": 3,
+      "partial": 1
+    },
+    "n": 10
+  },
+  "no_oil": {
+    "before": {
+      "false_positive": 3,
+      "correct": 7
+    },
+    "after": {
+      "false_positive": 3,
+      "correct": 7
+    },
+    "n": 10
+  },
+  "lookalike": {
+    "before": {
+      "false_positive": 10
+    },
+    "after": {
+      "correct": 7,
+      "false_positive": 3
+    },
+    "n": 10
+  }
+}

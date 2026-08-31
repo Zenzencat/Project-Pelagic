@@ -10,6 +10,7 @@ venv/
 data/raw/
 data/processed/
 data/holdout/
+data/external/
 # Note: data/synthetic/ and data/pelagic.db are tracked
 
 # Frontend
@@ -34,3 +35,8 @@ checkpoints/model_real_v2_final.pt
 kaggle_model_dataset/
 kaggle_output/
 kaggle_eval_output/
+
+# Phase 3.6 lookalike-diagnostic raw crop arrays (131MB of regenerated-only-by-
+# rerun 2048x2048 dumps; the JSON feature vectors + overview PNG beside them
+# ARE tracked). Everything else under output/ is fine to add.
+output/phase3_6_diagnostic/*.npz

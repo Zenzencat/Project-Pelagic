@@ -1,0 +1,58 @@
+{
+  "results": {
+    "logistic_regression": {
+      "val_accuracy": 0.8682795698924731,
+      "val_precision": 0.8962655601659751,
+      "val_recall": 0.9,
+      "val_f1": 0.8981288981288982,
+      "val_auc": 0.9367108585858586,
+      "val_confusion_matrix": [
+        [
+          107,
+          25
+        ],
+        [
+          24,
+          216
+        ]
+      ]
+    },
+    "random_forest": {
+      "val_accuracy": 0.8387096774193549,
+      "val_precision": 0.8333333333333334,
+      "val_recall": 0.9375,
+      "val_f1": 0.8823529411764706,
+      "val_auc": 0.9291982323232323,
+      "val_confusion_matrix": [
+        [
+          87,
+          45
+        ],
+        [
+          15,
+          225
+        ]
+      ]
+    },
+    "gradient_boosting": {
+      "val_accuracy": 0.8790322580645161,
+      "val_precision": 0.9012345679012346,
+      "val_recall": 0.9125,
+      "val_f1": 0.906832298136646,
+      "val_auc": 0.946685606060606,
+      "val_confusion_matrix": [
+        [
+          108,
+          24
+        ],
+        [
+          21,
+          219
+        ]
+      ]
+    }
+  },
+  "best_model": "gradient_boosting",
+  "n_train": 1485,
+  "n_val": 372
+}

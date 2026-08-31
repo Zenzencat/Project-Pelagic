@@ -1,0 +1,20 @@
+{
+  "val_accuracy": 0.8682795698924731,
+  "val_precision": 0.8687258687258688,
+  "val_recall": 0.9375,
+  "val_f1": 0.9018036072144289,
+  "val_auc": 0.9360479797979797,
+  "val_confusion_matrix": [
+    [
+      98,
+      34
+    ],
+    [
+      15,
+      225
+    ]
+  ],
+  "oversample_factor": 4,
+  "n_large_blob_train": 12,
+  "n_train_boosted": 1521
+}

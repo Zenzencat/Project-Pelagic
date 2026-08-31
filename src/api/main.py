@@ -37,6 +37,7 @@ from src.inference import run_tiled_inference
 from src.analysis.geoutils import get_scene_geolocation
 from src.analysis.contour import mask_to_polygons
 from src.analysis.landmask import strip_land_pixels
+from src.analysis.lookalike_filter import classify_and_filter
 from src.analysis.cdse_auth import get_cdse_token, CdseAuthError
 from src.data.cdse_fetch import find_best_product, fetch_scene_geotiff, CdseFetchError
 from src.analysis.gfw_client import get_nearby_vessels
@@ -97,6 +98,12 @@ else:
 # Request schemas
 class PredictRequest(BaseModel):
     scene_id: str
+    # Phase 4 (docs/status.md): opt-in, additive post-hoc lookalike filter
+    # (src/analysis/lookalike_filter.py) on top of the existing v2 U-Net.
+    # Default False -- every existing caller (the 4 verified cached demo
+    # scenes, any client that predates this field) gets byte-identical
+    # behavior to before this was added. NOT a silent replacement.
+    apply_lookalike_filter: bool = False
 
 class LiveFetchRequest(BaseModel):
     min_lat: float
@@ -237,8 +244,16 @@ def predict(payload: PredictRequest):
     # whole-image forward pass, which puts every interior pixel in a receptive-field
     # context the model never saw during training.
     probs, preds_bin = run_tiled_inference(model, norm, device)
+
+    # 3b. Phase 4, opt-in only (docs/status.md): post-hoc lookalike filter.
+    # Untouched (preds_bin passes through exactly as before) unless the
+    # caller explicitly sets apply_lookalike_filter=True -- see PredictRequest.
+    lookalike_filter_info = None
+    if payload.apply_lookalike_filter:
+        preds_bin, lookalike_filter_info = classify_and_filter(image_raw, probs, preds_bin)
+
     preds = preds_bin * 255
-        
+
     # 4. Contour Tracing (Convert binary mask to GeoJSON Polygon, via
     # src/analysis/contour.py's mask_to_polygons -- see that module for the
     # simplification-tolerance and smoothing rationale)
@@ -310,6 +325,14 @@ def predict(payload: PredictRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # Phase 4: fold apply_lookalike_filter into the cache key so toggling it
+    # for an already-cached scene_id can't silently return a stale result
+    # produced under the other setting -- reuses Resolution #6's existing
+    # "hash mismatch -> overwrite in place" cache-invalidation logic (that
+    # mechanism was built for checkpoint swaps, but "which detection recipe
+    # produced this row" generalizes the same way).
+    effective_hash = CHECKPOINT_HASH + ("+lookalike_filter" if payload.apply_lookalike_filter else "")
+
     # No real acquisition timestamp exists for any holdout/synthetic scene
     # (confirmed extensively -- see docs/status.md), so real GFW attribution
     # cannot honestly run here (it would mean defaulting the timestamp,
@@ -340,7 +363,7 @@ def predict(payload: PredictRequest):
             bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon,
             json.dumps(geojson),
             f"data/processed/{mask_png_name}",
-            CHECKPOINT_HASH,
+            effective_hash,
             scene_source,
             vessel_status
         ))
@@ -349,14 +372,16 @@ def predict(payload: PredictRequest):
 
     except sqlite3.IntegrityError:
         # scene_id already has a row (UNIQUE constraint). Only treat it as a
-        # valid cache hit if it was produced by the checkpoint currently loaded —
-        # otherwise this is stale data left by a since-swapped checkpoint, and
+        # valid cache hit if it was produced by the same checkpoint AND the
+        # same apply_lookalike_filter setting currently in effect (both are
+        # folded into effective_hash) -- otherwise this is stale data left by
+        # a since-swapped checkpoint or a different filter setting, and
         # silently returning it would misreport a re-analysis as unchanged.
         cursor.execute("SELECT id, checkpoint_hash FROM detections WHERE scene_id = ?;", (scene_id,))
         existing = cursor.fetchone()
         det_id = existing["id"]
 
-        if existing["checkpoint_hash"] != CHECKPOINT_HASH:
+        if existing["checkpoint_hash"] != effective_hash:
             cursor.execute("""
             UPDATE detections SET
                 confidence_score = ?, bbox_min_lat = ?, bbox_min_lon = ?, bbox_max_lat = ?, bbox_max_lon = ?,
@@ -368,7 +393,7 @@ def predict(payload: PredictRequest):
                 bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon,
                 json.dumps(geojson),
                 f"data/processed/{mask_png_name}",
-                CHECKPOINT_HASH,
+                effective_hash,
                 scene_source,
                 vessel_status,
                 det_id
@@ -379,7 +404,10 @@ def predict(payload: PredictRequest):
         conn.close()
 
     # Return detail response
-    return get_detection_details(det_id)
+    response = get_detection_details(det_id)
+    if lookalike_filter_info is not None:
+        response["lookalike_filter"] = lookalike_filter_info
+    return response
 
 
 @app.post("/api/live/fetch")

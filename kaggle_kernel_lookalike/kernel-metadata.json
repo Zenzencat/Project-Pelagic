@@ -1,0 +1,19 @@
+{
+  "id": "trongzen/project-pelagic-lookalike-classifier",
+  "title": "Project Pelagic Lookalike Classifier",
+  "code_file": "train_lookalike_classifier.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [
+    "shuddhabrotabanerjee/oil-spill-dartis-part1",
+    "shuddhabrotabanerjee/oil-spill-dartis-part2",
+    "trongzen/project-pelagic-model-best"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}

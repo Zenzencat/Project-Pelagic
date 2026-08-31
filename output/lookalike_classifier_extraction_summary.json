@@ -1,0 +1,8 @@
+{
+  "n_pairs_total": 1885,
+  "n_kept": 1857,
+  "n_skipped": {
+    "oil": 0,
+    "lookalike": 28
+  }
+}
