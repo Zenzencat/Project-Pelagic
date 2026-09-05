@@ -1,0 +1,15 @@
+{
+  "id": "papawitsaeliw/project-pelagic-dsen2-cr-feasibility",
+  "title": "Project Pelagic DSen2-CR Feasibility",
+  "code_file": "dsen2cr_feasibility.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": ["papawitsaeliw/dsen2cr-sarcarl-checkpoint", "papawitsaeliw/pelagic-dsen2cr-phase2-input"],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}

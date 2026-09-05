@@ -1,0 +1,68 @@
+{
+  "phase": 1,
+  "steps": {
+    "kernel_internet": {
+      "verdict": "PASS",
+      "detail": "outbound DNS works"
+    },
+    "conda_present": {
+      "verdict": "PASS",
+      "detail": "conda 26.5.3"
+    },
+    "py37_env": {
+      "verdict": "PASS",
+      "detail": "isolated env `p37` = Python 3.7.12"
+    },
+    "tf115_import": {
+      "verdict": "PASS",
+      "detail": "TF 1.15.0 | Keras 2.2.4 | h5py 2.10.0 numpy 1.18.5 | GPU False | 2026-09-05 18:22:12.462556: E tensorflow/stream_executor/cuda/cuda_driver.cc:318] failed call to cuInit: UNKNOWN ERROR (303) | Using TensorFlow backend."
+    },
+    "clone": {
+      "verdict": "PASS",
+      "detail": "dsen2-cr cloned"
+    },
+    "checkpoint_available": {
+      "verdict": "PASS",
+      "detail": "model_SARcarl.hdf5 75943784 bytes, valid HDF5"
+    },
+    "checkpoint_load": {
+      "verdict": "PASS",
+      "detail": "official SARcarl weights loaded, 18947341 params"
+    },
+    "phase2_inference": {
+      "verdict": "PASS",
+      "detail": "one forward pass completed, output finite"
+    }
+  },
+  "host": {
+    "gpu": "Tesla T4, 580.159.04\nTesla T4, 580.159.04"
+  },
+  "phase1": "PASS \u2014 env installs, official checkpoint loads.",
+  "phase2b": {
+    "aoi": "coalpoint",
+    "aoi_bbox_latlon": [
+      34.3816,
+      -119.8924,
+      34.3944,
+      -119.8796
+    ],
+    "s1_product": "S1C_IW_GRDH_1SDV_20260814T015754_20260814T015819_008985_011D4A_3AA8.SAFE",
+    "s1_acquired": "2026-08-14T01:57:54.716210Z",
+    "s2_product": "S2B_MSIL1C_20260813T183919_N0512_R070_T11SKU_20260813T222439.SAFE",
+    "s2_acquired": "2026-08-13T18:39:19.024000Z",
+    "s2_scene_cloud_pct": 15.380453283168,
+    "s2_patch_cloud_frac": 1.0,
+    "hours_apart": 0,
+    "clear_reference": "S2A_MSIL1C_20260810T184831_N0512_R070_T10SGD_20260811T032641.SAFE",
+    "output_finite": true,
+    "output_is_flat": false,
+    "output_std": 0.19253121316432953,
+    "diagnostics": {
+      "output luminance vs SAR-VV corr": "0.506",
+      "output 16px-seam strength / global grad": "0.925",
+      "output negative-pixel fraction": "0.162"
+    },
+    "note": "open-water test, patch fully clouded. Visual read in phase2b_panels.png. No in-patch clear water to compare against; clear S2 panel is a different day."
+  },
+  "overall": "PHASE 1 PASS + PHASE 2 (land) + PHASE 2b (open water) ran \u2014 see phase2b_panels.png"
+}

@@ -223,18 +223,66 @@ alignment has not been established.
 
 ### DSen2-CR
 
-**Stopped for good by explicit user decision; do not retry without new
-instruction.** No integration, import, model instantiation, weights load or
-inference was established.
+**Feasibility since PROVEN on Kaggle (2026-09-06, see below); still NOT
+integrated and integration still needs an explicit decision.** The original
+stop stood until the user re-authorised a scoped Kaggle attempt.
 
-The investigated stack was Python 3.7, TensorFlow GPU 1.15.0, Keras 2.2.4,
-NumPy 1.17 and h5py 2.10.0. Earlier DNS/Docker-access failures later recovered,
+The originally-investigated stack was Python 3.7, TensorFlow GPU 1.15.0, Keras
+2.2.4, NumPy 1.17 and h5py 2.10.0. Earlier DNS/Docker-access failures later recovered,
 but the official Dockerfile's `nvidia/cuda:9.0-cudnn7-devel` base image was
 absent from Docker Hub. An alternative TensorFlow image was pulled, but remained
 untested beyond that before the user stopped work for lack of training/evaluation
 resources. Scratch repository and image were removed; no TensorFlow/Keras
 dependencies were added to Pelagic.
 See [cloud_removal_scoping.md](cloud_removal_scoping.md) and historical reports.
+
+**Kaggle feasibility retry (2026-09-06) — DSen2-CR actually works. GO for
+feasibility; still NOT integrated.** Per `prompt/PROJECT Pelagic — DSen2-CR
+feasibil.md`, a scoped check ran as an isolated Kaggle kernel
+(`kaggle_kernel_dsen2cr/`, nothing in the main venv/requirements touched). The
+earlier close-by-decision was blocking on the broken PyTorch port; the
+**Keras/TF path — the one with published checkpoints — was never tried in a
+correct Python 3.7 environment**. It works:
+
+- **Phase 1 PASS.** Kaggle base image is Python 3.12 / no conda, so the kernel
+  bootstraps **Miniforge** into `/tmp` (Miniforge, not Miniconda, to dodge the
+  Anaconda-defaults ToS gate), builds a `conda` **python 3.7.12** env, and pip-
+  installs `tensorflow-gpu==1.15.0` + `keras==2.2.4` + `h5py==2.10.0` +
+  `numpy==1.18.5` — all import cleanly. `model_SARcarl.hdf5` (75,943,784 bytes,
+  from a private Kaggle dataset mirror — `gdown` can't parse Drive's current
+  page) builds `DSen2CR_model(...)` (18,947,341 params) and **`load_weights()`
+  completes with no error**.
+- **Phase 2 PASS.** One real S1C GRD (2026-08-31) + S2B L1C 13-band
+  (2026-09-01, ~28% cloud) pair, fetched locally with this project's CDSE creds
+  (`kaggle_kernel_dsen2cr/fetch_phase2_pair.py`), run through one
+  `model.predict`. Output `(1,27,128,128)`, `pred[:13]` finite, well-
+  distributed (mean 0.57, std 0.37), **not** flat/garbage. Visual check
+  (`kaggle_kernel_dsen2cr/run_evidence/phase2_triptych.png`): the cloud+shadow
+  over ~40% of the patch is **substantially removed**, the highway interchange
+  reconstructed continuously, clear areas preserved — a plausible cloud-removed
+  reconstruction.
+- **Phase 2b PASS (open water, the harder case).** S1C GRD (2026-08-14) + S2B
+  L1C (2026-08-13, ~7 h apart) over the Coal Oil Point natural seep field
+  (Santa Barbara Channel) — open water, real slicks. Patch was **100% clouded**
+  (no partial-cloud pass exists over that AOI); SAR VV mean −29.7 dB, mostly
+  **below DSen2-CR's −25 dB clip floor**, so the model got near-blank SAR +
+  fully-clouded optical. Output: **smooth, plausible, correctly-coloured water
+  (visible-band means within ~1% of a clear-day reference), NO artifacts / noise
+  / checkerboard** — but **featureless**: it fell back to an average-water prior
+  and recovered no surface texture, did not reconstruct the slick visible in the
+  SAR. `run_evidence/phase2b_panels.png`. It doesn't break over water; under
+  thick cloud it just doesn't add usable optical signal.
+- TF 1.15 cannot use Kaggle's T4 (`cuInit ERROR 303`, CUDA-10-in-env vs
+  CUDA-12 host); inference ran **on CPU in ~10 s / patch**, so GPU is not a
+  blocker for a post-hoc stage.
+
+Full detail + honest caveats in
+[../kaggle_kernel_dsen2cr/RESULT.md](../kaggle_kernel_dsen2cr/RESULT.md).
+**Recommendation: viability is proven and the model is well-behaved on land and
+open water; Phase 2b mildly weakens the "useful for lookalike discrimination"
+case (bland output under thick cloud). Whether it's worth further time is a
+separate decision. The decisive next test is a partial-cloud open-water slick
+scene. If pursued: post-hoc only (Option B), never the live path.**
 
 ## Existing application, model and QC state
 

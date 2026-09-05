@@ -40,3 +40,7 @@ kaggle_eval_output/
 # rerun 2048x2048 dumps; the JSON feature vectors + overview PNG beside them
 # ARE tracked). Everything else under output/ is fine to add.
 output/phase3_6_diagnostic/*.npz
+
+# DSen2-CR feasibility kernel: transient run outputs + fetched satellite pixels
+kaggle_kernel_dsen2cr/_run*/
+kaggle_kernel_dsen2cr/phase2_data/
