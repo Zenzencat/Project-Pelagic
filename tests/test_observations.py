@@ -26,6 +26,28 @@ def test_date_identity_coverage_and_ranking():
     assert not covers_bbox({'footprint': None}, BBOX)
 
 
+def test_one_acquisition_listed_twice_is_one_candidate():
+    """CDSE returns a COG and a non-COG row per sensing time. Those are one
+    observation, so the caller's bounded retry must not spend both attempts on
+    them -- it has to reach the next real date. Mirrors the real catalog rows
+    in docs/live_catalog_verification.json, where 8 rows are 4 acquisitions."""
+    original = product()
+    rows = []
+    for day in ('22', '29', '03', '17'):
+        rows.append(product(f'{day}-plain', day))
+        rows.append(product(f'{day}-cog', day, name=f'S1A_IW_GRDH_1SDV_{day}_COG.SAFE'))
+
+    results = select_comparison_products(rows, original, BBOX, window_days=90)
+
+    assert len(results) == 4
+    assert len({p['start'] for p in results}) == 4
+    # The retry bound used by src/api/main.py::_temporal_evidence.
+    assert len({p['start'] for p in results[:2]}) == 2
+    # Ranked by distance from the original's 2026-08-11, one row per date, and
+    # the best-ranked representation of each acquisition is the one kept.
+    assert [p['id'] for p in results] == ['17-plain', '03-plain', '22-plain', '29-plain']
+
+
 def test_primary_date_range_is_exact(monkeypatch):
     monkeypatch.setattr('src.data.cdse_fetch.search_same_track_passes',
                         lambda *a, **kw: [product('inside', '11'), product('outside', '13')])

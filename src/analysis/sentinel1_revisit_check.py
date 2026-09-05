@@ -63,7 +63,23 @@ def select_comparison_products(products, original, bbox, window_days=30):
         same_direction = (ref_attrs.get('orbitDirection') is not None and
                           attrs.get('orbitDirection') == ref_attrs['orbitDirection'])
         return (not same_track, not same_direction, abs((acquisition_time(product['start']) - ref).total_seconds()))
-    return sorted(candidates, key=rank)
+    # CDSE lists one sensing time under more than one product (a COG and a
+    # non-COG row carry different ids and names for the same acquisition), so
+    # deduplicating on id/name alone made four real revisits look like eight
+    # candidates and left the caller's bounded retry trying the same
+    # acquisition twice instead of falling back to another date. Full-bbox
+    # coverage is already required above, so rows sharing a sensing time are
+    # the same observation; keep the best-ranked representation of each.
+    # Ties between representations resolve by catalog order (sorted() is
+    # stable), so the choice is deterministic for a given catalog response.
+    deduplicated, seen_times = [], set()
+    for product in sorted(candidates, key=rank):
+        time = acquisition_time(product['start'])
+        if time in seen_times:
+            continue
+        seen_times.add(time)
+        deduplicated.append(product)
+    return deduplicated
 
 
 def coverage_density_precheck(scene_coords, window_days_year=365):

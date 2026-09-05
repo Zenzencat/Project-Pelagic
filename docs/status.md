@@ -75,7 +75,9 @@ DSen2-CR integration, import or inference was ever established.
   `include_temporal` defaults false; window defaults ±30 days (1–90).
 - Candidates require valid identity/time, another UTC date, IW GRDH VV/VH and
   full footprint coverage. Known matching orbit track/direction rank first.
-  At most two candidates are tried. No result is `no_match`; catalog, fetch or
+  Candidates are then deduplicated by sensing time, because CDSE lists one
+  acquisition under several products (a COG and a non-COG row). At most two
+  candidates are tried. No result is `no_match`; catalog, fetch or
   inference failure is `unavailable`. Duplicate pixel hashes are rejected.
 - Primary selection honors the requested inclusive date range. Process fetching
   checks all source identities/dates, full validity and GeoTIFF bbox. Ambiguous
@@ -92,11 +94,16 @@ DSen2-CR integration, import or inference was ever established.
   `d514853f-fc94-4799-b40e-c44e81412d0b`, acquired
   `2026-08-10T11:24:44.116503Z`. Its name ends in `_COG.SAFE`;
   compatibility with Process source identifiers is still unverified.
-- ±30-day search returned 26 catalog rows and 8 eligible alternatives. First
+- ±30-day search returned 26 catalog rows and **4 eligible alternative
+  acquisitions**. The saved artifact records 8 eligible *product rows*, which
+  is the same four sensing times listed twice each (COG and non-COG); the
+  earlier "8 eligible alternatives" wording counted rows, not revisits. First
   ranked was `a69cadd2-a4fb-4066-a7a8-b2e421ce77f3`, acquired
   `2026-08-22T11:24:44.593430Z`, matching relative orbit 171/ASCENDING.
   Saved names, footprints, attributes and selection results are in
-  [live_catalog_verification.json](live_catalog_verification.json).
+  [live_catalog_verification.json](live_catalog_verification.json); re-running
+  selection over that artifact now yields 4 candidates spanning 2026-08-22,
+  2026-07-29, 2026-09-03 and 2026-07-17.
 - Limits: 1000 catalog rows, conservative full coverage, at most two attempts,
   and 2048-pixel output cap. Orbit/sea state/resampling differences prevent
   treating visual differences as a validated oil classification.
