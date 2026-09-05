@@ -647,11 +647,39 @@ def live_fetch(payload: LiveFetchRequest):
                                                           window_days=payload.optical_window_days)
         except Exception as exc:
             supplementary['optical'] = {'status': 'unavailable', 'reason': f'Optical analysis failed ({type(exc).__name__}).'}
-    conn = get_db_connection()
-    conn.execute("UPDATE detections SET supplementary_json = ? WHERE id = ?",
-                 (json.dumps(supplementary, allow_nan=False), det_id))
-    conn.commit()
-    conn.close()
+    # Persisting optional evidence must not take down a detection that has
+    # already committed -- same rule as every supplementary call above. Two
+    # things can fail here: json.dumps(allow_nan=False) refuses a non-finite
+    # value rather than emitting invalid JSON, and the write itself can fail.
+    # Neither is a reason to 500 a successful primary inference.
+    try:
+        evidence_json = json.dumps(supplementary, allow_nan=False)
+    except (ValueError, TypeError) as exc:
+        # Keep each source's status even when a payload (a preview, a stray
+        # non-finite number) can't be serialized. A degraded but honest record
+        # beats an empty one; the statuses are our own strings, so this is safe.
+        reason = f"Evidence could not be serialized ({type(exc).__name__})."
+        degraded = {"original": {"status": "unavailable", "reason": reason}}
+        for key in ("era5", "temporal", "optical"):
+            value = supplementary.get(key)
+            degraded[key] = {"status": value.get("status", "unavailable"),
+                             "reason": value.get("reason", reason)} if isinstance(value, dict) else \
+                            {"status": "unavailable", "reason": reason}
+        evidence_json = json.dumps(degraded)
+        print(f"[!] Supplementary evidence degraded for detection {det_id}: {reason}", file=sys.stderr)
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        conn.execute("UPDATE detections SET supplementary_json = ? WHERE id = ?", (evidence_json, det_id))
+        conn.commit()
+    except sqlite3.Error as exc:
+        # The row keeps its NULL, which surfaces as {} -- no evidence claimed.
+        print(f"[!] Supplementary evidence not persisted for detection {det_id} "
+              f"({type(exc).__name__}); primary detection is unaffected.", file=sys.stderr)
+    finally:
+        if conn is not None:
+            conn.close()
 
     osm_note = (
         f" ({land_stats['oil_px_removed_by_osm_only']:,} px via real OSM island refinement)"
