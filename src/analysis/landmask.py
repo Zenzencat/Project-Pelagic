@@ -52,7 +52,7 @@ from global_land_mask import globe
 from src.analysis.osm_coastline import get_osm_land_mask
 
 
-def strip_land_pixels(preds, center_lat, center_lon, scale, bbox=None, osm_timeout=25):
+def strip_land_pixels(preds, center_lat, center_lon, scale, bbox=None, osm_timeout=25, scale_y=None):
     """
     Zero out any predicted "oil" pixel (value 255) in `preds` that falls on
     land, so land never reaches contour extraction / area calculation /
@@ -71,11 +71,22 @@ def strip_land_pixels(preds, center_lat, center_lon, scale, bbox=None, osm_timeo
     ~930m raster (Round 15). Omitted (or if the live Overpass call fails --
     never raises) falls back to raster-only, same as before Round 16.
 
+    `scale` is degrees-per-pixel in longitude; `scale_y` is the latitude
+    equivalent. They differ for any scene that isn't square in degrees --
+    live Process API scenes are resampled to a fixed width/height, so the
+    GeoTIFF's ScaleX != ScaleY. Callers MUST pass the same scale_y they
+    give src/analysis/contour.py::mask_to_polygons, or the land mask and
+    the polygons it is meant to filter will be computed on two different
+    latitude grids (measured up to ~11 km apart on a 0.2 deg x 0.4 deg
+    bbox at 59N). Defaults to `scale` so square-pixel callers, including
+    every cached holdout scene, are unaffected.
+
     Returns (masked_preds, stats). `preds` is not mutated in place.
     """
+    scale_y = scale if scale_y is None else scale_y
     H, W = preds.shape
     ys, xs = np.indices((H, W))
-    lats = center_lat + (H // 2 - ys) * scale
+    lats = center_lat + (H // 2 - ys) * scale_y
     lons = center_lon + (xs - W // 2) * scale
     is_land_raster = globe.is_land(lats, lons)
 
@@ -84,7 +95,8 @@ def strip_land_pixels(preds, center_lat, center_lon, scale, bbox=None, osm_timeo
     if bbox is not None:
         min_lat, min_lon, max_lat, max_lon = bbox
         is_land_osm, osm_status = get_osm_land_mask(
-            min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, scale, H, W, timeout=osm_timeout
+            min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, scale, H, W,
+            timeout=osm_timeout, scale_y=scale_y
         )
 
     is_land = is_land_raster | is_land_osm
