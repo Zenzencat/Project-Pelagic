@@ -1,3 +1,4 @@
+import { WindEvidence, ObservationEvidence } from './SupplementaryEvidence';
 import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Polygon, CircleMarker, Polyline, useMap } from 'react-leaflet';
 import { ShieldAlert, Layers, Anchor, Loader2, Info } from 'lucide-react';
@@ -151,10 +152,8 @@ function getSlickStrokeWeight(nFragments) {
   return 1;
 }
 
-// Zero-confidence detections are the API's fallback placeholder square
-// (src/api/main.py draws a tiny mock polygon when the model finds no slick
-// pixels at all), not a real contour -- treat them as "no oil" rather than
-// rendering/measuring that placeholder as if it were a detection.
+// Zero-confidence detections have no real contour -- treat them as "no oil"
+// rather than rendering/measuring them as detections.
 const hasRealDetection = (det) => !!det && det.confidence_score > 0.001;
 
 // Real bounding box to frame the camera on: the detected polygon's own
@@ -175,7 +174,9 @@ function getFitBounds(det) {
         if (lon > maxLon) maxLon = lon;
       }
     }
-    return [[minLat, minLon], [maxLat, maxLon]];
+    if (Number.isFinite(minLat) && Number.isFinite(minLon) && Number.isFinite(maxLat) && Number.isFinite(maxLon)) {
+      return [[minLat, minLon], [maxLat, maxLon]];
+    }
   }
   if (det.bbox) {
     return [[det.bbox[0], det.bbox[1]], [det.bbox[2], det.bbox[3]]];
@@ -222,6 +223,12 @@ export default function App() {
   const [liveDateFrom, setLiveDateFrom] = useState('2026-08-05');
   const [liveDateTo, setLiveDateTo] = useState('2026-08-15');
   const [liveRadiusKm, setLiveRadiusKm] = useState('10');
+  const [includeOptical, setIncludeOptical] = useState(false);
+  const [opticalWindow, setOpticalWindow] = useState(10);
+  const [maxCloud, setMaxCloud] = useState(20);
+  const [includeTemporal, setIncludeTemporal] = useState(false);
+  const [temporalWindow, setTemporalWindow] = useState(30);
+  const [includeEra5, setIncludeEra5] = useState(false);
   const [liveFetching, setLiveFetching] = useState(false);
   const [liveResult, setLiveResult] = useState(null); // {status, detail}
 
@@ -341,9 +348,16 @@ export default function App() {
           date_from: liveDateFrom,
           date_to: liveDateTo,
           radius_km: parseFloat(liveRadiusKm) || 10,
+          include_era5: includeEra5,
+          include_temporal: includeTemporal,
+          include_optical: includeOptical,
+          optical_window_days: Number(opticalWindow),
+          optical_max_cloud_pct: Number(maxCloud),
+          temporal_window_days: Number(temporalWindow),
         }),
       });
       const body = await res.json();
+      if (!res.ok) throw new Error(Array.isArray(body.detail) ? body.detail.map(e => e.msg).join('; ') : body.detail || 'Live fetch failed.');
       setLiveResult({ status: body.status, detail: body.detail });
 
       if (body.status === 'OK' && body.detection) {
@@ -462,6 +476,31 @@ export default function App() {
             <input type="number" step="1" min="1" value={liveRadiusKm} onChange={e => setLiveRadiusKm(e.target.value)}
               style={{ width: '60px', fontSize: '0.72rem', padding: '5px 6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: '#fff' }} />
           </div>
+          <details style={{ margin: '8px 0', fontSize: '0.78rem' }}>
+          <summary style={{ cursor: 'pointer' }}>Supplementary evidence (optional)</summary>
+          <label style={{ display: 'block', fontSize: '0.78rem', margin: '8px 0' }}>
+            <input type="checkbox" checked={includeEra5} onChange={e => setIncludeEra5(e.target.checked)} />
+            {' '}ERA5 wind evidence (optional, up to 60 seconds)
+          </label>
+          <label style={{ display: 'block', fontSize: '0.78rem', margin: '8px 0' }}>
+            <input type="checkbox" checked={includeTemporal} onChange={e => setIncludeTemporal(e.target.checked)} />
+            {' '}Compare another Sentinel-1 pass
+          </label>
+          {includeTemporal && <label style={{ display: 'block', fontSize: '0.78rem', marginBottom: 8 }}>
+            Search ± days: <input type="number" min="1" max="90" value={temporalWindow}
+              onChange={e => setTemporalWindow(e.target.value)} style={{ width: 60 }} />
+          </label>}
+          <label style={{ display: 'block', fontSize: '0.78rem', margin: '8px 0' }}>
+            <input type="checkbox" checked={includeOptical} onChange={e => setIncludeOptical(e.target.checked)} />
+            {' '}Sentinel-2 optical supplement
+          </label>
+          {includeOptical && <div style={{ fontSize: '0.78rem', marginBottom: 8 }}>
+            <label>Search ± days: <input type="number" min="1" max="30" value={opticalWindow}
+              onChange={e => setOpticalWindow(e.target.value)} style={{ width: 50 }} /></label>
+            {' '}<label>Max cloud %: <input type="number" min="0" max="100" value={maxCloud}
+              onChange={e => setMaxCloud(e.target.value)} style={{ width: 50 }} /></label>
+          </div>}
+          </details>
           <button onClick={handleLiveFetch} disabled={liveFetching}
             style={{
               width: '100%', padding: '8px', borderRadius: '6px', border: 'none',
@@ -603,6 +642,8 @@ export default function App() {
                 </span>
               </div>
               
+              {selectedDet.source === 'live' && <WindEvidence evidence={selectedDet.supplementary?.era5} />}
+
               {/* Vessels List inside details -- real GFW AIS candidates only
                   (src/analysis/gfw_client.py), never the old mock_vessels.
                   "candidate" wording matches the source data's own posture:
@@ -648,6 +689,9 @@ export default function App() {
       {/* 4. Right Map Panel */}
       <div id="map-container" style={{ flex: 1, position: 'relative', height: '100%' }}>
         
+        {selectedDet?.source === 'live' && selectedDet.supplementary?.original && (
+          <ObservationEvidence evidence={selectedDet.supplementary} />
+        )}
         {/* Leaflet MapContainer */}
         <MapContainer 
           center={getMapCenter()} 

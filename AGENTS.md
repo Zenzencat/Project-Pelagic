@@ -43,13 +43,13 @@ flag the discrepancy rather than silently repeating either figure.
 
 ## Structural notes worth knowing before editing
 
-- **`src/data/preprocess.py::run_full_preprocessing()` has a known, unfixed
-  bug**: it doesn't branch on dB vs. linear-scale input the way
-  `src/api/main.py`'s `/api/predict` does. Feeding synthetic (linear-scale)
-  data through it silently produces a saturated `[1.0, 1.0]` patch — no
-  information content, but no error either. This affects `verify_pipeline.py`,
-  `src/verify_training.py`, and `verify_real_pipeline.py`'s fallback mode,
-  which all currently report false "success." See status.md Open Issue #1.
+- **`src/data/preprocess.py::run_full_preprocessing()` now delegates
+  normalization to `preprocess_for_prediction()`**, so synthetic linear-scale
+  inputs take the same calibration path as `/api/predict` while existing dB
+  inputs retain their prior behavior. Deterministic regression tests cover the
+  independent numerical formulas, patch alignment, balanced sampling, random
+  state restoration, and synthetic dataloader integration. See status.md
+  Resolution #3 and the resolved Open Issue #1 entry.
 - **`kaggle_kernel/train_kaggle.py` cannot import `src/data/`** (Kaggle
   kernels must be single-file), so its patch-sampling logic is a manual
   duplicate of `src/data/dataset.py` / `preprocess.py`. Both files carry an

@@ -1,53 +1,19 @@
-"""
-Project Pelagic — Live Sentinel-1 Fetch via Copernicus Data Space Ecosystem
-SWU Prasarnmit AI Engineering Final Project
+"""Live Sentinel-1 GRD discovery and calibrated GeoTIFF retrieval.
 
-Fetches a real, calibrated, orthorectified Sentinel-1 GRD scene for a given
-bounding box + date range, for the live detection pipeline
-(POST /api/live/fetch in src/api/main.py). Two real CDSE services, both
-verified live against this project's actual configured credentials:
+Reuses public CDSE OData search, shared OAuth authentication (at the caller),
+and shared Sentinel Hub Process transport. Requests sigma0 VV/VH at the chosen
+catalog acquisition interval, then validates source product names, dates,
+valid-pixel coverage and GeoTIFF bounds before accepting the pixels.
 
-1. Product search: the public (no-auth) OData catalog, via
-   src/analysis/sentinel1_revisit_check.py::search_same_track_passes() --
-   reused as-is, not duplicated. Used for real product discovery and the
-   real acquisition start/stop datetime (OData's ContentDate.Start/End),
-   since that's the one field this module must never fabricate/default.
-2. Pixel data: CDSE's Sentinel Hub Process API (sh.dataspace.copernicus.eu).
-
-Why Process API, not a raw SAFE product download (the originally-planned
-approach): this repo's CDSE_CLIENT_ID/SECRET (confirmed valid by
-scripts/validate_credentials.py) are Sentinel Hub OAuth2 client credentials.
-They authenticate fine against CDSE's shared Keycloak token endpoint
-(src/analysis/cdse_auth.py), but a live test against the raw-product
-download service (zipper/download.dataspace.copernicus.eu) rejected them
-with HTTP 401 "Token audience not allowed" (error code DAT-ZIP-609) -- that
-service needs a different credential type (CDSE portal username/password),
-not provided in this environment. The Sentinel Hub Catalog + Process APIs
-were verified live and working with these exact credentials: a real request
-against a real Singapore Strait Sentinel-1D scene (acquired 2026-08-11)
-returned a real 512x512 float32 GeoTIFF with real ModelTiepointTag /
-ModelPixelScaleTag values matching the requested bbox exactly, and real
-sigma0 backscatter values (VV mean ~0.43, VH mean ~0.049 linear --
-physically plausible, not placeholder data).
-
-This is also a strictly simpler design than the original raw-download +
-manual calibration-LUT-XML-parsing plan: Sentinel Hub performs real
-SIGMA0_ELLIPSOID radiometric calibration and orthorectification
-server-side, so the returned GeoTIFF is already in the exact linear-sigma0,
-simple-lat/lon-grid form src/analysis/geoutils.py and the existing
-speckle/dB/normalize preprocessing already expect. No GDAL, no manual GCP
-handling, no LUT XML parsing, and no multi-GB download.
+The original day-window client was externally tested in earlier sessions.
+The strict source/coverage path added on 2026-09-05 is locally tested only;
+see docs/status.md for real external verification blockers.
 """
 
 import math
 from datetime import datetime, timedelta
 
-import requests
-
 from src.analysis.sentinel1_revisit_check import search_same_track_passes
-
-CATALOG_URL = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
-PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
 
 # Real ground sampling distance this project's model was trained/evaluated on
 # (see src/api/main.py's REAL_PIXEL_SCALE_DEG) -- requesting output at this
@@ -65,20 +31,6 @@ MAX_OUTPUT_PX = 2048
 # for robustness against non-multiple inputs.
 PATCH_SIZE = 256
 
-EVALSCRIPT = """
-//VERSION=3
-function setup() {
-  return {
-    input: [{bands: ["VV", "VH"]}],
-    output: {bands: 2, sampleType: "FLOAT32"}
-  };
-}
-function evaluatePixel(sample) {
-  return [sample.VV, sample.VH];
-}
-"""
-
-
 class CdseFetchError(Exception):
     """Raised when CDSE product search or the Process API fetch fails, or no
     matching product is found -- never silently falls back to a mock scene."""
@@ -90,30 +42,23 @@ def find_best_product(min_lat, min_lon, max_lat, max_lon, date_from_iso, date_to
     intersecting the bbox within [date_from_iso, date_to_iso]. Returns the
     most recent match (dict with real id/name/start/end/footprint) or None.
     """
-    ref = datetime.fromisoformat(date_from_iso.replace("Z", "+00:00")) + (
-        datetime.fromisoformat(date_to_iso.replace("Z", "+00:00"))
-        - datetime.fromisoformat(date_from_iso.replace("Z", "+00:00"))
-    ) / 2
-    window_days = max(
-        1,
-        (
-            datetime.fromisoformat(date_to_iso.replace("Z", "+00:00"))
-            - datetime.fromisoformat(date_from_iso.replace("Z", "+00:00"))
-        ).days
-        // 2
-        + 1,
-    )
-
-    products = search_same_track_passes(
-        min_lat, max_lat, min_lon, max_lon,
-        reference_date_iso=ref.strftime("%Y-%m-%dT%H:%M:%S"),
-        window_days=window_days,
-        product_type="GRD",
-    )
-    if not products:
-        return None
-    products.sort(key=lambda p: p["start"], reverse=True)
-    return products[0]
+    from datetime import timezone
+    from src.data.observation_catalog import acquisition_time, valid_product, covers_bbox
+    start = datetime.fromisoformat(date_from_iso.replace('Z', '+00:00'))
+    end = datetime.fromisoformat(date_to_iso.replace('Z', '+00:00'))
+    start = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start
+    end = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end
+    if len(date_to_iso) == 10:
+        end += timedelta(days=1)
+    ref = start + (end - start) / 2
+    window_days = max(1, math.ceil((end - start).total_seconds() / 172800))
+    bbox = (min_lat, min_lon, max_lat, max_lon)
+    products = search_same_track_passes(min_lat, max_lat, min_lon, max_lon,
+                                       ref.isoformat(), window_days=window_days)
+    products = [p for p in products if valid_product(p) and
+                start <= acquisition_time(p['start']) < end and
+                '_IW_GRDH_1SDV_' in p['name'] and covers_bbox(p, bbox)]
+    return max(products, key=lambda p: acquisition_time(p['start']), default=None)
 
 
 def _output_size(min_lat, min_lon, max_lat, max_lon):
@@ -128,54 +73,64 @@ def _output_size(min_lat, min_lon, max_lat, max_lon):
     return min(round_up(width_px), MAX_OUTPUT_PX), min(round_up(height_px), MAX_OUTPUT_PX)
 
 
-def fetch_scene_geotiff(token, min_lat, min_lon, max_lat, max_lon, acquisition_start_iso, out_path):
-    """
-    Calls Sentinel Hub's Process API for a single UTC-day window around the
-    product's real acquisition_start_iso, requesting real SIGMA0_ELLIPSOID
-    calibration + orthorectification for (VV, VH), written to out_path as a
-    GeoTIFF. The output's ModelTiepointTag/ModelPixelScaleTag match the
-    requested bbox exactly -- src/analysis/geoutils.py's existing
-    get_scene_geolocation() reads it back unmodified.
-    """
-    width_px, height_px = _output_size(min_lat, min_lon, max_lat, max_lon)
+def fetch_scene_geotiff(token, min_lat, min_lon, max_lat, max_lon, acquisition_start_iso, out_path,
+                        *, product=None):
+    """Fetch only the selected acquisition; validate product metadata and data coverage.
 
-    day = datetime.fromisoformat(acquisition_start_iso.replace("Z", "+00:00"))
-    day_start = day.strftime("%Y-%m-%dT00:00:00Z")
-    day_end = (day + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
-
+    S1 supports ORBIT mosaicking. The returned orbit's source tiles must ALL
+    identify the selected product; ambiguous mosaics fail instead of being
+    assigned a fabricated single-scene identity. Real end metadata is required.
+    """
+    import io
+    import numpy as np
+    import tifffile
+    from src.data.sentinel_process import process_request, verify_sources
+    if product is None or product.get('start') != acquisition_start_iso or not product.get('end'):
+        raise CdseFetchError('Real selected product identity and acquisition interval required')
+    width, height = _output_size(min_lat, min_lon, max_lat, max_lon)
     body = {
-        "input": {
-            "bounds": {"bbox": [min_lon, min_lat, max_lon, max_lat]},
-            "data": [{
-                "type": "sentinel-1-grd",
-                "dataFilter": {
-                    "timeRange": {"from": day_start, "to": day_end},
-                    "resolution": "HIGH",
-                },
-                "processing": {"backCoeff": "SIGMA0_ELLIPSOID", "orthorectify": True},
-            }],
-        },
-        "output": {
-            "width": width_px,
-            "height": height_px,
-            "responses": [{"identifier": "default", "format": {"type": "image/tiff"}}],
-        },
-        "evalscript": EVALSCRIPT,
-    }
-
-    r = requests.post(
-        PROCESS_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "image/tiff",
-        },
-        json=body,
-        timeout=120,
-    )
-    if r.status_code != 200:
-        raise CdseFetchError(f"CDSE Process API request failed: HTTP {r.status_code} — {r.text[:300]}")
-
-    with open(out_path, "wb") as f:
-        f.write(r.content)
-    return out_path
+        'input': {'bounds': {'bbox': [min_lon, min_lat, max_lon, max_lat]}, 'data': [{
+            'type': 'sentinel-1-grd',
+            'dataFilter': {'timeRange': {'from': product['start'], 'to': product['end']},
+                           'resolution': 'HIGH', 'acquisitionMode': 'IW', 'polarization': 'DV'},
+            'processing': {'backCoeff': 'SIGMA0_ELLIPSOID', 'orthorectify': True}}]},
+        'output': {'width': width, 'height': height, 'responses': [
+            {'identifier': 'default', 'format': {'type': 'image/tiff'}},
+            {'identifier': 'validity', 'format': {'type': 'image/tiff'}},
+            {'identifier': 'userdata', 'format': {'type': 'application/json'}}]},
+        'evalscript': """
+//VERSION=3
+function setup() {
+  return {input: ["VV", "VH", "dataMask"], mosaicking: "ORBIT", output: [
+    {id: "default", bands: 2, sampleType: "FLOAT32"},
+    {id: "validity", bands: 1, sampleType: "UINT8"}]};
+}
+function evaluatePixel(samples) {
+  if (!samples.length) return {default: [0, 0], validity: [0]};
+  return {default: [samples[0].VV, samples[0].VH], validity: [samples[0].dataMask]};
+}
+function updateOutputMetadata(scenes, inputMetadata, outputMetadata) {
+  outputMetadata.userData = {tiles: [].concat.apply([], scenes.orbits.map(o => o.tiles))};
+}
+"""}
+    try:
+        files, metadata = process_request(token, body)
+        provenance = verify_sources(metadata, product, 'S1')
+        pixels = tifffile.imread(io.BytesIO(files['default.tif']))
+        valid = tifffile.imread(io.BytesIO(files['validity.tif']))
+        if pixels.shape != (height, width, 2) or not np.isfinite(pixels).all() or (pixels < 0).any():
+            raise ValueError('Invalid calibrated VV/VH raster')
+        if valid.shape != (height, width) or not (valid == 1).all():
+            raise ValueError('Selected product does not provide valid data throughout the requested footprint')
+        from src.analysis.geoutils import get_scene_geolocation
+        geo = get_scene_geolocation(io.BytesIO(files['default.tif']))
+        returned_bbox = [geo['min_lat'], geo['min_lon'], geo['max_lat'], geo['max_lon']]
+        if not np.allclose(returned_bbox, [min_lat, min_lon, max_lat, max_lon], rtol=0, atol=1e-7):
+            raise ValueError('Returned GeoTIFF footprint differs from requested region')
+        provenance['bbox'] = returned_bbox
+        with open(out_path, 'wb') as stream:
+            stream.write(files['default.tif'])
+        return provenance
+    except Exception as exc:
+        raise CdseFetchError(f'Sentinel-1 fetch/validation failed ({type(exc).__name__}): {exc}' if isinstance(exc, ValueError)
+                             else f'Sentinel-1 fetch/validation failed ({type(exc).__name__}).') from exc

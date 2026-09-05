@@ -13,7 +13,7 @@ pydantic>=2.0
 # heavier geospatial stack (shapely/geopandas/fiona) needed.
 global-land-mask>=1.0.0
 
-# Optional: only needed to actually run src/analysis/era5_wind_check.py.
+# Optional ERA5 support: standalone script or live include_era5 evidence.
 # Requires a free CDS account + API key (https://cds.climate.copernicus.eu) --
 # not configured in this environment. See that module's docstring.
 cdsapi>=0.7.0
@@ -26,3 +26,6 @@ netCDF4>=1.6.0
 # a local .env file instead of requiring them to be exported in the shell
 # uvicorn is launched from. See .env.example.
 python-dotenv>=1.0.0
+
+# Validate full satellite footprint coverage for supplementary observations.
+shapely>=2.0
