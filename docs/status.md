@@ -647,6 +647,20 @@ Simulated the gate on the held-out validation split: gated examples (confidence 
 
 ---
 
+## Empty prediction geometry repair (current branch)
+
+`POST /api/predict` now preserves an empty GeoJSON `coordinates` array when no
+valid contour exists, including after land-mask removal or opt-in lookalike
+suppression. The cache recipe suffix `+empty_geometry_v1` repairs legacy
+placeholder rows on POST and removes stale vessel rows; GET requests do not
+rewrite history. Focused coverage is in
+[`docs/predict_empty_masks.md`](predict_empty_masks.md) and
+`tests/test_predict_empty_masks.py`; the focused suite reports **5 passed**.
+The frontend production build passed, and a real-browser check covered both
+positive-confidence and zero-confidence empty geometry bounds handling. This
+change is scoped to `/api/predict`; the clean-base `/api/live/fetch` fallback
+is unchanged.
+
 ## Open Issues
 
 ### 1. `run_full_preprocessing()` has no dB/linear-scale branching — found this session

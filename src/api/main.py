@@ -289,16 +289,6 @@ def predict(payload: PredictRequest):
 
     polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
 
-    # Fallback to a tiny mock polygon if no slicks were segmented
-    if not polygons:
-        polygons = [[
-            [center_lon - 0.01, center_lat - 0.01],
-            [center_lon + 0.01, center_lat - 0.01],
-            [center_lon + 0.01, center_lat + 0.01],
-            [center_lon - 0.01, center_lat + 0.01],
-            [center_lon - 0.01, center_lat - 0.01]
-        ]]
-        
     geojson = {
         "type": "Polygon",
         "coordinates": polygons
@@ -325,13 +315,15 @@ def predict(payload: PredictRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # The versioned empty-geometry suffix also invalidates pre-fix cached rows
+    # whose fabricated placeholder polygon must be repaired on POST.
     # Phase 4: fold apply_lookalike_filter into the cache key so toggling it
     # for an already-cached scene_id can't silently return a stale result
     # produced under the other setting -- reuses Resolution #6's existing
     # "hash mismatch -> overwrite in place" cache-invalidation logic (that
     # mechanism was built for checkpoint swaps, but "which detection recipe
     # produced this row" generalizes the same way).
-    effective_hash = CHECKPOINT_HASH + ("+lookalike_filter" if payload.apply_lookalike_filter else "")
+    effective_hash = CHECKPOINT_HASH + "+empty_geometry_v1" + ("+lookalike_filter" if payload.apply_lookalike_filter else "")
 
     # No real acquisition timestamp exists for any holdout/synthetic scene
     # (confirmed extensively -- see docs/status.md), so real GFW attribution

@@ -151,10 +151,8 @@ function getSlickStrokeWeight(nFragments) {
   return 1;
 }
 
-// Zero-confidence detections are the API's fallback placeholder square
-// (src/api/main.py draws a tiny mock polygon when the model finds no slick
-// pixels at all), not a real contour -- treat them as "no oil" rather than
-// rendering/measuring that placeholder as if it were a detection.
+// Zero-confidence detections have no real contour -- treat them as "no oil"
+// rather than rendering/measuring them as detections.
 const hasRealDetection = (det) => !!det && det.confidence_score > 0.001;
 
 // Real bounding box to frame the camera on: the detected polygon's own
@@ -175,7 +173,9 @@ function getFitBounds(det) {
         if (lon > maxLon) maxLon = lon;
       }
     }
-    return [[minLat, minLon], [maxLat, maxLon]];
+    if (Number.isFinite(minLat) && Number.isFinite(minLon) && Number.isFinite(maxLat) && Number.isFinite(maxLon)) {
+      return [[minLat, minLon], [maxLat, maxLon]];
+    }
   }
   if (det.bbox) {
     return [[det.bbox[0], det.bbox[1]], [det.bbox[2], det.bbox[3]]];
