@@ -173,29 +173,15 @@ def preprocess_for_prediction(image_raw, already_calibrated=False):
 
 def run_full_preprocessing(image_raw, mask_raw=None, patch_size=256, stride=128, category=None):
     """
-    Runs the full pipeline sequence: calibration -> filtering -> dB scale -> normalize -> extract patches.
-    Handles already-decibel (dB) Sentinel-1 imagery by converting to linear for speckle filtering,
-    re-scaling back to dB, and normalizing.
+    Runs shared real-vs-synthetic-aware preprocessing, then extracts patches.
+    ``preprocess_for_prediction()`` detects already-dB Sentinel-1 imagery and
+    preserves the established linear-scale calibration path for synthetic data.
 
     If `category` is given ("oil" / "lookalike" / "no_oil"), background patches are
     downsampled via extract_patches_balanced() instead of extract_patches() keeping
     every patch, matching the class-balanced sampling used for the real training run.
     """
-    if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
-        image_raw = image_raw.transpose(1, 2, 0)
-
-    # 1. Convert already-dB input back to linear space for speckle filtering
-    linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
-
-    # 2. Apply speckle filter in linear space
-    filtered = speckle_filter(linear, window_size=5)
-
-    # 3. Convert back to decibels
-    db = 10.0 * np.log10(np.clip(filtered, 1e-5, None))
-
-    # 4. Normalize to [0.0, 1.0] range
-    min_db, max_db = -25.0, 0.0
-    norm = (np.clip(db, min_db, max_db) - min_db) / (max_db - min_db)
+    norm = preprocess_for_prediction(image_raw)
 
     # 5. Patch Extraction
     if mask_raw is not None:

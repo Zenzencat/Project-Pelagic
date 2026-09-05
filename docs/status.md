@@ -14,10 +14,11 @@ This document captures the current status of the project, including recent resol
 * **Status**: Resolved.
 * Added `allow_verification_fallback: bool = False` to `get_real_dataloaders()` in `src/data/dataset.py`. If matching GeoTIFF images for masks are not found and the parameter is `False`, the loader raises a `RuntimeError` at construction time instead of silently falling back to synthetic mock data. `verify_real_pipeline.py` passes `allow_verification_fallback=True` since its purpose is local pipeline-shape verification, not real training.
 
-### 3. Smart dB/Linear-Scale Preprocessing — `main.py` only, NOT the shared preprocessing module
-* **Status**: Resolved in `src/api/main.py`'s `/api/predict`. **Not** propagated to `src/data/preprocess.py::run_full_preprocessing()` — see Open Issue #1 below, found during this session's health check.
-* `/api/predict` checks `np.any(image_raw < 0)` to distinguish real dB-scale Sentinel-1 imagery from linear-scale synthetic data and runs the correct calibration path for each. This fixed a real zero-confidence segmentation failure when real imagery was run through the synthetic-only preprocessor.
-* This exact fix was never applied to the shared `run_full_preprocessing()` used by `get_dataloaders()` (the synthetic-only training path) and by `get_real_dataloaders()`'s verification-fallback branch — that function still unconditionally assumes dB-scale input. See Open Issue #1.
+### 3. Smart dB/Linear-Scale Preprocessing — shared prediction and loader paths
+* **Status**: Resolved in both `src/api/main.py`'s `/api/predict` and `src/data/preprocess.py::run_full_preprocessing()`.
+* Both paths now use `preprocess_for_prediction()`, which checks `np.any(image_raw < 0)` to distinguish real dB-scale Sentinel-1 imagery from linear-scale synthetic data and runs the correct calibration path for each. The live calibrated-linear path remains explicit via `already_calibrated=True`.
+* Added `tests/test_preprocess.py`: an independent numerical oracle for linear and dB formulas, HWC/CHW handling, patch/image-mask alignment, category-balanced positive retention, and a five-scene synthetic dataloader integration. Focused result: **6 passed** with `rtk proxy python -m pytest tests/test_preprocess.py -q`.
+* This aligns loader behavior with existing API semantics. It does not claim physical calibration of synthetic generator values; those values are sigma0-like linear inputs, and the existing helper's DN-squaring behavior is intentionally preserved for that path.
 
 ### 4. U-Net v2 Retraining with Scheduler and Oversampling
 * **Status**: Completed.
@@ -649,16 +650,9 @@ Simulated the gate on the held-out validation split: gated examples (confidence 
 
 ## Open Issues
 
-### 1. `run_full_preprocessing()` has no dB/linear-scale branching — found this session
-* **Status**: Open, not fixed. Found during this session's health-check test run, not previously documented anywhere.
-* `src/data/preprocess.py::run_full_preprocessing()` (used by `get_dataloaders()` — the synthetic-only training path — and by `get_real_dataloaders()`'s verification-fallback branch) unconditionally assumes dB-scale input, unlike `main.py`'s `/api/predict` (Recent Resolution #3), which correctly branches on `np.any(image_raw < 0)`.
-* **Confirmed with a direct test**: raw synthetic data from `generate_synthetic.py` is small positive linear values (0.0001-0.30). Running it through `run_full_preprocessing()` produces a preprocessed patch value range of **exactly `[1.0, 1.0]`** — completely saturated, zero information content.
-* **Does not affect the real v1/v2 checkpoints** — those were trained exclusively via `train_kaggle.py` on real dB-scale Kaggle data, where the "always assume dB" logic is correct by design (Kaggle never has synthetic fallback data, per the hard-fail guard).
-* **Does undermine three verification scripts' actual purpose**, even though all three currently report "success":
-  * `verify_pipeline.py` — passes its own shape/range assertions (`[0,1]` bound-check) while actually feeding degenerate flat-`1.0` patches through the pipeline. The assertions check bounds, not information content, so this was never caught.
-  * `src/verify_training.py` — the resulting 2-epoch training run collapses to all-zero predictions. The script's own comment attributes this to "common for short runs on small synthetic sets due to random initialization" — given the confirmed flat-`1.0` input, the more likely real cause is that the training data has no signal to learn from at all, not the epoch count.
-  * `verify_real_pipeline.py` — same saturated `[1.0, 1.0]` image range observed when run in verification-fallback mode (its normal mode locally, since real images aren't downloaded here).
-* **Not fixed as part of this session** — this is a report-only health check per this round's scope. Worth a small, well-scoped fix in a future round (mirror `main.py`'s branching into `run_full_preprocessing()`).
+### 1. `run_full_preprocessing()` had no dB/linear-scale branching — resolved
+* **Status**: Resolved by delegating to `preprocess_for_prediction()` in `src/data/preprocess.py`.
+* The regression suite covers the shared preprocessing entry point, finite varying normalized output, exact independent linear/dB formulas, HWC/CHW handling, patch alignment, balanced positive retention, and a five-scene synthetic dataloader integration. No model metrics or training runs were rerun.
 
 ### 2. Frontend slick-size badge is hardcoded fake data
 * **Status**: Open, flagged not fixed (see Recent Resolution #8).
