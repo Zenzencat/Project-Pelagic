@@ -27,7 +27,7 @@ def api(monkeypatch, tmp_path):
     monkeypatch.setattr(main.tifffile, 'imread', lambda *a: np.ones((256, 256, 2), dtype=np.float32))
     monkeypatch.setattr(main, 'preprocess_for_prediction', lambda *a, **kw: np.ones((2, 256, 256)))
     monkeypatch.setattr(main, 'run_tiled_inference', lambda *a: (np.zeros((256, 256)), np.zeros((256, 256), dtype=np.uint8)))
-    monkeypatch.setattr(main, 'get_scene_geolocation', lambda *a: {'center_lat': 1.2, 'center_lon': 103.8, 'pixel_scale_deg': 0.2/256, 'min_lat': 1.1, 'min_lon': 103.7, 'max_lat': 1.3, 'max_lon': 103.9})
+    monkeypatch.setattr(main, 'get_scene_geolocation', lambda *a: {'center_lat': 1.2, 'center_lon': 103.8, 'pixel_scale_deg': 0.2/256, 'pixel_scale_y_deg': 0.2/256, 'min_lat': 1.1, 'min_lon': 103.7, 'max_lat': 1.3, 'max_lon': 103.9})
     monkeypatch.setattr(main, 'strip_land_pixels', lambda mask, *a, **kw: (mask, {'oil_px_total_before': 0}))
     monkeypatch.setattr(main, 'get_nearby_vessels', lambda *a, **kw: {'status': 'skipped_no_credentials', 'detail': 'test double', 'vessels': []})
     return main

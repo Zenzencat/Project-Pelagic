@@ -301,6 +301,14 @@ def predict(payload: PredictRequest):
         has_real_geo = False
     H, W = preds.shape
 
+    # "pixel_scale_deg" is ScaleX only; latitude needs the GeoTIFF's own
+    # ScaleY. Every cached holdout scene has ScaleY == ScaleX, so this is a
+    # no-op there; it matters for any scene whose bbox isn't square in degrees.
+    # Both the land mask and the contour tracing below must use the SAME
+    # scale_y or they end up on two different latitude grids -- see
+    # strip_land_pixels' docstring.
+    scale_y = geo["pixel_scale_y_deg"] if has_real_geo else scale
+
     # Land-sea masking (src/analysis/landmask.py): strip predicted "oil"
     # pixels that fall on land before contour extraction, so a SAR dark-
     # backscatter false positive over land never reaches the reported
@@ -308,9 +316,10 @@ def predict(payload: PredictRequest):
     # skipped for the synthetic-scene placeholder-coordinate fallback above,
     # which has no real location to check land/sea against.
     if has_real_geo:
-        preds, _land_stats = strip_land_pixels(preds, center_lat, center_lon, scale, bbox=scene_bbox)
+        preds, _land_stats = strip_land_pixels(preds, center_lat, center_lon, scale,
+                                               bbox=scene_bbox, scale_y=scale_y)
 
-    polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
+    polygons = mask_to_polygons(preds, center_lat, center_lon, scale, scale_y=scale_y)
 
     geojson = {
         "type": "Polygon",
@@ -447,10 +456,14 @@ def _analyze_live_scene(img_path, scene_id, product, provenance):
     geo = get_scene_geolocation(img_path)
     bbox = [geo['min_lat'], geo['min_lon'], geo['max_lat'], geo['max_lon']]
     center_lat, center_lon, scale = geo['center_lat'], geo['center_lon'], geo['pixel_scale_deg']
-    preds, land_stats = strip_land_pixels(preds_bin * 255, center_lat, center_lon, scale, bbox=bbox)
+    # Live Process scenes are resampled to a fixed width/height, so ScaleY != ScaleX
+    # whenever the requested bbox isn't square in degrees. The land mask and the
+    # contours must share this, or they land on two different latitude grids.
+    scale_y = geo['pixel_scale_y_deg']
+    preds, land_stats = strip_land_pixels(preds_bin * 255, center_lat, center_lon, scale,
+                                          bbox=bbox, scale_y=scale_y)
     # Separate rings match the existing frontend contract. No placeholder for an empty mask.
-    polygons = mask_to_polygons(preds, center_lat, center_lon, scale,
-                               scale_y=(geo['max_lat'] - geo['min_lat']) / preds.shape[0])
+    polygons = mask_to_polygons(preds, center_lat, center_lon, scale, scale_y=scale_y)
     slick_pixels = probs[preds == 255]
     confidence = float(np.mean(slick_pixels)) if len(slick_pixels) else 0.0
     mask_dir = os.path.join(BASE_DIR, 'data', 'processed')
@@ -633,11 +646,39 @@ def live_fetch(payload: LiveFetchRequest):
                                                           window_days=payload.optical_window_days)
         except Exception as exc:
             supplementary['optical'] = {'status': 'unavailable', 'reason': f'Optical analysis failed ({type(exc).__name__}).'}
-    conn = get_db_connection()
-    conn.execute("UPDATE detections SET supplementary_json = ? WHERE id = ?",
-                 (json.dumps(supplementary, allow_nan=False), det_id))
-    conn.commit()
-    conn.close()
+    # Persisting optional evidence must not take down a detection that has
+    # already committed -- same rule as every supplementary call above. Two
+    # things can fail here: json.dumps(allow_nan=False) refuses a non-finite
+    # value rather than emitting invalid JSON, and the write itself can fail.
+    # Neither is a reason to 500 a successful primary inference.
+    try:
+        evidence_json = json.dumps(supplementary, allow_nan=False)
+    except (ValueError, TypeError) as exc:
+        # Keep each source's status even when a payload (a preview, a stray
+        # non-finite number) can't be serialized. A degraded but honest record
+        # beats an empty one; the statuses are our own strings, so this is safe.
+        reason = f"Evidence could not be serialized ({type(exc).__name__})."
+        degraded = {"original": {"status": "unavailable", "reason": reason}}
+        for key in ("era5", "temporal", "optical"):
+            value = supplementary.get(key)
+            degraded[key] = {"status": value.get("status", "unavailable"),
+                             "reason": value.get("reason", reason)} if isinstance(value, dict) else \
+                            {"status": "unavailable", "reason": reason}
+        evidence_json = json.dumps(degraded)
+        print(f"[!] Supplementary evidence degraded for detection {det_id}: {reason}", file=sys.stderr)
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        conn.execute("UPDATE detections SET supplementary_json = ? WHERE id = ?", (evidence_json, det_id))
+        conn.commit()
+    except sqlite3.Error as exc:
+        # The row keeps its NULL, which surfaces as {} -- no evidence claimed.
+        print(f"[!] Supplementary evidence not persisted for detection {det_id} "
+              f"({type(exc).__name__}); primary detection is unaffected.", file=sys.stderr)
+    finally:
+        if conn is not None:
+            conn.close()
 
     osm_note = (
         f" ({land_stats['oil_px_removed_by_osm_only']:,} px via real OSM island refinement)"

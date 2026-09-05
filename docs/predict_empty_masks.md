@@ -8,8 +8,11 @@ bounds, the saved black-or-partial mask PNG, and the confidence calculated from
 the surviving predicted pixels. A positive confidence with empty coordinates
 is therefore possible for a prediction too small to form a polygon.
 
-This change is scoped to `/api/predict`. The clean-base `/api/live/fetch` path
-still has its existing fallback and is intentionally unchanged by this PR.
+This was originally scoped to `/api/predict` alone, leaving `/api/live/fetch`'s
+own placeholder fallback in place. That is no longer accurate: the integration
+into `main` (commit `ac8c318`) removed the live path's fallback too, so **both**
+endpoints now return empty `coordinates` rather than a fabricated square. The
+live path builds its geometry in `_analyze_live_scene()`.
 
 The cache recipe includes `+empty_geometry_v1`, before the optional
 `+lookalike_filter` suffix. A POST for an existing scene repairs legacy rows

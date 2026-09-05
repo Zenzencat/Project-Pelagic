@@ -51,21 +51,31 @@ flag the discrepancy rather than silently repeating either figure.
   state restoration, and synthetic dataloader integration. See status.md
   Resolution #3 and the resolved Open Issue #1 entry.
 - **`kaggle_kernel/train_kaggle.py` cannot import `src/data/`** (Kaggle
-  kernels must be single-file), so its patch-sampling logic is a manual
-  duplicate of `src/data/dataset.py` / `preprocess.py`. Both files carry an
-  explicit cross-reference banner — if you change sampling rates or hard-fail
-  behavior in one, mirror it in the other or they will drift.
-- **`frontend/src/App.jsx`'s slick-size badge ("ขนาดคราบ") is hardcoded fake
-  data** (`8.5`/`14.5` km²) for every detection — not wired to the real
-  geojson-derived area. Known, flagged, not yet fixed.
+  kernels must be single-file), so its preprocessing and patch-sampling logic
+  is a manual duplicate of `src/data/dataset.py` / `preprocess.py`. Both files
+  carry an explicit cross-reference banner — if you change sampling rates,
+  hard-fail behavior, or dB-scale handling in one, mirror it in the other or
+  they will drift. Re-synced 2026-09-05 for the `preprocess_for_prediction()`
+  delegation above; verified byte-identical to the repo version on real
+  holdout dB data, so `checkpoints/model_real_v2_best.pt` still corresponds to
+  what this kernel produces.
+- **`frontend/src/App.jsx`'s slick-size badge ("ขนาดคราบ") is real.** It goes
+  through `calcSlickAreaKm2()` on the detection's own GeoJSON coordinates. An
+  earlier version of this file claimed it was a hardcoded `8.5`/`14.5` km²
+  mock; that mock was replaced and the note was left stale. See status.md's
+  "Remaining pre-existing issues and corrected status drift" item 3.
 - **Live mode exists alongside the 4 cached demo scenes**: `POST /api/live/fetch`
   fetches a real Sentinel-1 scene from Copernicus Data Space Ecosystem (via
   the Sentinel Hub Process API, not a raw SAFE download — see `docs/status.md`
   Recent Resolution #9 for why) and attributes it to real nearby AIS vessels
   via the Global Fishing Watch API (`src/analysis/gfw_client.py`). This
-  replaced the old hardcoded `mock_vessels` in `main.py`. Real `CDSE_CLIENT_ID`
-  / `CDSE_CLIENT_SECRET` / `GFW_TOKEN` credentials are configured in this
-  repo's `.env` and verified working — don't assume they're absent.
+  replaced the old hardcoded `mock_vessels` in `main.py`. `CDSE_CLIENT_ID` /
+  `CDSE_CLIENT_SECRET` / `GFW_TOKEN` were configured and verified working in
+  the original author's checkout, but `.env` is gitignored, so **check whether
+  they are actually present in yours** rather than assuming either way — the
+  2026-09-05 session ran without them and correctly reported
+  `not_configured`. `CDSAPI_URL` / `CDSAPI_KEY` (ERA5) were never configured
+  in any checkout so far.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
@@ -74,12 +84,40 @@ flag the discrepancy rather than silently repeating either figure.
   reduction from lookalikes (wind shadows, biogenic films) is
   indistinguishable from real oil at the pixel level. Both checkpoints score
   `0.0000` IoU/Dice on all 10 lookalike holdout scenes — v2's oversampling
-  reduces false-positive area but doesn't come close to solving it. Two
-  investigations toward fixing this (ERA5 wind cross-check + multi-temporal
-  SAR comparison; SAR-optical fusion via DSen2-CR) are scoped/built but
-  blocked on a real external gap: **this dataset has no acquisition
-  timestamps anywhere**, confirmed against the Zenodo deposits directly.
-  See status.md for full detail — don't re-investigate this from scratch.
+  reduces false-positive area but doesn't come close to solving it. The
+  supplementary-evidence sources below (ERA5 wind, different-date SAR,
+  Sentinel-2 optical) are now built and wired into the **live** path, but they
+  cannot be applied to the holdout/training scenes at all: **this dataset has
+  no acquisition timestamps anywhere**, confirmed against the Zenodo deposits
+  directly. SAR-optical fusion via DSen2-CR was stopped for good by explicit
+  decision. See status.md for full detail — don't re-investigate this from
+  scratch.
+- **Supplementary evidence on `POST /api/live/fetch`** (added 2026-09-05,
+  Tasks 1–3 of `prompt/pelagic-loop.md`): three opt-in sources, all defaulting
+  to `false`, all surfacing evidence only — **none of them produces an oil,
+  lookalike, or persistence verdict**, and that is deliberate. Keep it that way.
+  - `include_era5` → `src/analysis/era5_wind_check.py::get_wind_evidence()`,
+    ERA5 10 m u/v on a 0.25° grid via CDS. Needs `CDSAPI_URL`/`CDSAPI_KEY`
+    (or `~/.cdsapirc`) *plus* dataset-license acceptance.
+  - `include_temporal` → `_temporal_evidence()` in `main.py`, using
+    `src/analysis/sentinel1_revisit_check.py::select_comparison_products()`.
+    Reuses the primary fetch/inference path via `_analyze_live_scene()`.
+  - `include_optical` → `src/data/sentinel2_optical.py`, Sentinel-2 L2A
+    true-colour RGB with a cloud threshold. Not fusion, not cloud removal.
+  - Shared plumbing lives in `src/data/observation_catalog.py` (public OData
+    search + footprint validation) and `src/data/sentinel_process.py` (Process
+    transport + returned-source verification). Reuse these rather than adding
+    a second Sentinel pipeline.
+  - Results persist in `detections.supplementary_json` and come back on
+    `GET /api/detections/{id}` as `supplementary`; legacy rows are `NULL` and
+    surface as `{}`. Rendered by `frontend/src/SupplementaryEvidence.jsx`.
+  - **Every status here is honest by design** (`available` / `no_match` /
+    `unavailable` / `not_configured` / `skipped`). Never substitute a
+    placeholder number for a missing measurement.
+  - **Not yet verified against real credentials.** No authenticated Process
+    response, real ERA5 record, or real satellite pixels have gone through
+    this path. `prompt/pelagic-credential-verification.md` is the checklist;
+    `docs/status.md` Tasks 1–3 record exactly what is and isn't proven.
 - **Post-hoc lookalike classifier (Phases 1–4, `src/analysis/lookalike_filter.py`)**:
   a downstream Gradient Boosting classifier + U-Net-confidence gate that judges
   each candidate detection oil-vs-lookalike. On the 30-scene holdout it fixes

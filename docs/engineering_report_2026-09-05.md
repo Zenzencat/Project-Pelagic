@@ -58,8 +58,10 @@ handoff; this report is a summary for review and decision-making.
   formulas, HWC/CHW input, patch/mask alignment, balanced sampling and a
   temporary synthetic DataLoader integration.
 - Public CDSE OData catalog verification found one real primary Sentinel-1
-  catalog product and eight eligible different-date candidates for the tested
-  Singapore Strait query. A nearby Sentinel-2 query returned an honest
+  catalog product and eight eligible different-date candidate *rows* for the
+  tested Singapore Strait query. Those eight rows are four distinct
+  acquisitions listed twice each (COG and non-COG); see `docs/status.md`
+  Task 2. A nearby Sentinel-2 query returned an honest
   `no_match` under the configured coverage/cloud criteria.
 
 ## External verification status

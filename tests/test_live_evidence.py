@@ -65,6 +65,57 @@ def test_http_wind_status_and_persistence(api, live_payload, monkeypatch, tmp_pa
         assert invalid.status_code == 422
 
 
+def test_unserializable_evidence_degrades_instead_of_failing(api, live_payload, monkeypatch):
+    """A non-finite value anywhere in the evidence must not 500 a detection
+    that already committed. json.dumps(allow_nan=False) rejects it, and the
+    endpoint has to fall back to the statuses rather than propagate."""
+    monkeypatch.setattr(api, 'get_wind_evidence',
+                        lambda *a: {'status': 'available', 'wind_speed_ms': float('nan')})
+    body = post(api, {**live_payload, 'include_era5': True})
+
+    assert body['status'] == 'OK'
+    supplementary = body['detection']['supplementary']
+    # The status survives; the unserializable payload does not.
+    assert supplementary['era5']['status'] == 'available'
+    assert 'wind_speed_ms' not in supplementary['era5']
+    assert supplementary['original']['status'] == 'unavailable'
+    assert supplementary['temporal']['status'] == 'skipped'
+
+    detail = jsonable_encoder(api.get_detection_details(body['detection']['id']))
+    assert detail['supplementary'] == supplementary
+
+
+def test_storage_failure_does_not_fail_the_detection(api, live_payload, monkeypatch):
+    """A write error while persisting optional evidence leaves the row's NULL
+    in place -- which reads back as {} -- and still returns the detection."""
+    import sqlite3
+    real_connection = api.get_db_connection
+    calls = {'n': 0}
+
+    class LockedOnExecute:
+        """sqlite3.Connection.execute is read-only, so wrap rather than patch."""
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, *args, **kwargs):
+            raise sqlite3.OperationalError('database is locked')
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    def flaky():
+        conn = real_connection()
+        calls['n'] += 1
+        # The supplementary UPDATE opens the second connection, after the
+        # one the detection INSERT used.
+        return LockedOnExecute(conn) if calls['n'] == 2 else conn
+
+    monkeypatch.setattr(api, 'get_db_connection', flaky)
+    body = post(api, live_payload)
+    assert body['status'] == 'OK'
+    assert body['detection']['supplementary'] == {}
+
+
 def test_empty_primary_has_no_fabricated_polygon(api, live_payload):
     result = post(api, live_payload)
     assert result['status'] == 'OK'

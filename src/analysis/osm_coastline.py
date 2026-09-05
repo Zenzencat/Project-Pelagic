@@ -173,7 +173,7 @@ def assemble_closed_rings(elements):
     return closed_rings, open_paths
 
 
-def rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W):
+def rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W, scale_y=None):
     """Even-odd rasterize closed coastline rings onto an HxW canvas at the
     scene's own pixel resolution (not a fixed global sample grid), so
     precision is limited only by the real vector geometry, not by a
@@ -183,8 +183,16 @@ def rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W):
     this function needing to classify which ring is an outer boundary vs.
     a hole.
 
+    `scale` is degrees-per-pixel in longitude; `scale_y` is the latitude
+    equivalent, which differs whenever the scene is not square in degrees
+    (live Process API scenes are resampled to a fixed width/height, so
+    ScaleX != ScaleY there). Defaults to `scale`, matching
+    src/analysis/contour.py::mask_to_polygons, so square-pixel callers are
+    unaffected.
+
     Returns an HxW boolean array (True = land).
     """
+    scale_y = scale if scale_y is None else scale_y
     canvas = np.zeros((H, W), dtype=np.uint8)
     if not closed_rings:
         return canvas == 255
@@ -193,7 +201,7 @@ def rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W):
     for ring in closed_rings:
         pts = np.array(
             [
-                ((lon - center_lon) / scale + W / 2, H / 2 - (lat - center_lat) / scale)
+                ((lon - center_lon) / scale + W / 2, H / 2 - (lat - center_lat) / scale_y)
                 for lon, lat in ring
             ],
             dtype=np.int32,
@@ -203,7 +211,8 @@ def rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W):
     return canvas == 255
 
 
-def get_osm_land_mask(min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, scale, H, W, timeout=25):
+def get_osm_land_mask(min_lat, min_lon, max_lat, max_lon, center_lat, center_lon, scale, H, W,
+                      timeout=25, scale_y=None):
     """End-to-end: fetch real coastline ways for this scene, assemble closed
     rings, rasterize them. Returns (is_land_bool_array, status_dict).
     `is_land_bool_array` is all-False (not an error) if OSM has no closed
@@ -216,7 +225,7 @@ def get_osm_land_mask(min_lat, min_lon, max_lat, max_lon, center_lat, center_lon
         return np.zeros((H, W), dtype=bool), result
 
     closed_rings, open_paths = assemble_closed_rings(result["elements"])
-    is_land = rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W)
+    is_land = rasterize_closed_rings(closed_rings, center_lat, center_lon, scale, H, W, scale_y=scale_y)
     status = {
         "status": "ok",
         "detail": f"{len(closed_rings)} closed island ring(s), {len(open_paths)} open (mainland) path(s) from OSM.",
