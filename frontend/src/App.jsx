@@ -202,7 +202,6 @@ function MapFitter({ det }) {
 export default function App() {
   const [detections, setDetections] = useState([]);
   const [selectedDet, setSelectedDet] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [predicting, setPredicting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -251,29 +250,23 @@ export default function App() {
           .find(Boolean);
         const targetId = autoSelectId || (firstDemo ? firstDemo.id : data[0].id);
         fetchDetectionDetails(targetId);
-      } else {
-        setLoading(false);
       }
     } catch (err) {
       console.error(err);
       setError('ไม่สามารถเชื่อมต่อกับ FastAPI Backend ได้ (API server offline)');
-      setLoading(false);
     }
   };
 
   // 2. Fetch specific detection details (including AIS vessels)
   const fetchDetectionDetails = async (id) => {
     try {
-      setLoading(true);
       const res = await fetch(`${API_BASE}/api/detections/${id}`);
       if (!res.ok) throw new Error('Failed to fetch detection details.');
       const data = await res.json();
       setSelectedDet(data);
-      setLoading(false);
     } catch (err) {
       console.error(err);
       setError('Failed to fetch details for selected detection.');
-      setLoading(false);
     }
   };
 
