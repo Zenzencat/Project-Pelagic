@@ -4,6 +4,7 @@ Start the frontend, then run this script with Playwright/Chromium installed.
 No backend, production database, satellite service or real measurement is used.
 """
 import argparse
+import base64
 import copy
 import json
 import re
@@ -39,6 +40,16 @@ def verify(url):
             if path == '/api/live/fetch':
                 requests.append(route.request.post_data_json)
                 body = {'status': 'OK', 'detail': 'TEST ONLY', 'detection': detection}
+            elif path.startswith('/api/previews/'):
+                if path.endswith('missing.png'):
+                    route.fulfill(status=404, body='missing')
+                    return
+                # Valid tiny PNG, deliberately test-only. This proves that
+                # API-relative preview references reach an image response.
+                route.fulfill(status=200, body=base64.b64decode(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/Sc5sWQAAAABJRU5ErkJggg=='),
+                    headers={'Content-Type': 'image/png'})
+                return
             elif path == '/api/detections':
                 body = [detection]
             elif path == f"/api/detections/{detection['id']}":
@@ -59,11 +70,19 @@ def verify(url):
                             valid_time_utc='2026-08-11T23:00:00+00:00', grid_lat=1.25, grid_lon=103.75)
                 alternate = {**original, 'scene_id': 'test-only-alternate',
                              'acquisition_start_utc': '2026-08-05T22:47:44Z'}
+                # Exercise the new API-relative URL on the primary image;
+                # comparison remains an inline legacy-style data URI.
+                original['overlay_preview'] = '/api/previews/900001_original_overlay.png'
                 temporal['observations'] = [alternate]
                 optical['observation'] = {
                     'acquisition_start_utc': '2026-08-10T03:00:00Z', 'cloud_cover_pct': 4,
-                    'rgb_preview': preview, 'product': {'name': 'TEST-ONLY-S2-L2A'},
+                    'rgb_preview': '/api/previews/900001_optical_rgb.png', 'product': {'name': 'TEST-ONLY-S2-L2A'},
                 }
+            else:
+                # Legacy data-URI consumers remain supported for rows written
+                # before preview storage moved to disk.
+                original['overlay_preview'] = preview
+            original['preview_note'] = 'Test graphic; not satellite data.'
             detection['supplementary'] = copy.deepcopy({
                 'original': original, 'era5': wind, 'temporal': temporal, 'optical': optical,
             })
@@ -88,6 +107,21 @@ def verify(url):
                 expect(evidence).to_contain_text(optical['observation']['acquisition_start_utc'])
             assert evidence.locator('img').evaluate_all('(imgs) => imgs.every(i => i.complete && i.naturalWidth > 0)')
             print(f'PASS browser rendering: {status} (test fixtures)')
+
+        # An evicted/missing URL should become an honest unavailable state,
+        # and a later fixture navigation must reset that state.
+        original['overlay_preview'] = '/api/previews/missing.png'
+        detection['supplementary'] = copy.deepcopy({
+            'original': original,
+            'era5': {'status': 'skipped', 'reason': 'Test-only'},
+            'temporal': {'status': 'skipped', 'reason': 'Test-only'},
+            'optical': {'status': 'skipped', 'reason': 'Test-only'},
+        })
+        page.goto(url)
+        page.get_by_text('Observation evidence — SAR and optical', exact=True).click()
+        evidence = page.locator('details').filter(has=page.get_by_text('Observation evidence — SAR and optical', exact=True))
+        expect(evidence.get_by_role('status')).to_contain_text('Preview unavailable.')
+        print('PASS browser rendering: missing preview 404 (test fixture)')
 
         page.get_by_text('Supplementary evidence (optional)', exact=True).click()
         checkboxes = [page.get_by_role('checkbox', name=name) for name in (

@@ -683,7 +683,7 @@ export default function App() {
       <div id="map-container" style={{ flex: 1, position: 'relative', height: '100%' }}>
         
         {selectedDet?.source === 'live' && selectedDet.supplementary?.original && (
-          <ObservationEvidence evidence={selectedDet.supplementary} />
+          <ObservationEvidence evidence={selectedDet.supplementary} apiBase={API_BASE} />
         )}
         {/* Leaflet MapContainer */}
         <MapContainer 

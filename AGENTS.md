@@ -74,8 +74,9 @@ flag the discrepancy rather than silently repeating either figure.
   the original author's checkout, but `.env` is gitignored, so **check whether
   they are actually present in yours** rather than assuming either way — the
   2026-09-05 session ran without them and correctly reported
-  `not_configured`. `CDSAPI_URL` / `CDSAPI_KEY` (ERA5) were never configured
-  in any checkout so far.
+  `not_configured`. The preview-storage session subsequently configured CDSE,
+  GFW and `CDSAPI_URL` in this checkout's ignored `.env`; `CDSAPI_KEY` is still
+  missing. Configuration does not establish successful authentication.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
@@ -111,6 +112,11 @@ flag the discrepancy rather than silently repeating either figure.
   - Results persist in `detections.supplementary_json` and come back on
     `GET /api/detections/{id}` as `supplementary`; legacy rows are `NULL` and
     surface as `{}`. Rendered by `frontend/src/SupplementaryEvidence.jsx`.
+    New live PNG previews are saved by `src/api/preview_storage.py` under
+    ignored `data/raw/live/previews/` and served at `/api/previews/{filename}`.
+    Existing inline preview rows remain unchanged. `MAX_PREVIEW_FILES` controls
+    oldest-first eviction; an evicted preview returns 404 and the UI reports it
+    unavailable.
   - **Every status here is honest by design** (`available` / `no_match` /
     `unavailable` / `not_configured` / `skipped`). Never substitute a
     placeholder number for a missing measurement.

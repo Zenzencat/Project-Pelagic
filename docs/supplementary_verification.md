@@ -1,9 +1,10 @@
 # Live supplementary evidence: verification guide
 
-The 2026-09-05 continuation verified local NetCDF, HTTP and browser paths and
-retrieved real public catalog metadata. Satellite pixels and ERA5 records remain
-unverified because credentials are absent. Read [status.md](status.md) for current
-blockers and measured results; catalog evidence is in
+The earlier 2026-09-05 continuation verified local NetCDF, HTTP and browser paths
+and retrieved real public catalog metadata. CDSE and GFW credentials are now
+configured locally; authenticated satellite pixels remain unverified, and ERA5
+still needs a CDS API key. Read [status.md](status.md) for current
+blockers and measured results; the historical catalog evidence is in
 [live_catalog_verification.json](live_catalog_verification.json).
 The original investigation details remain in [status_history.md](status_history.md).
 
@@ -36,11 +37,12 @@ validity or the geographic correspondence of real previews.
 The current disposable environment can run the complete Python suite with:
 
 ```bash
-rtk proxy /tmp/pelagic-verification-py314/bin/python -m pytest tests -q
+rtk proxy /tmp/pelagic-preview-verify.wExiDS/bin/python -m pytest tests -q
 ```
 
-It produced 30 passes, no skips, with dependency warnings described in status.md.
-This `/tmp` environment is disposable and is not assumed to survive a restart.
+Current results and dependency warnings are recorded in status.md. This `/tmp`
+environment is disposable and is not assumed to survive a restart. It adds
+xarray, netCDF4 and global-land-mask without changing project dependency pins.
 
 On a configured machine, install existing requirements in the project environment,
 populate the existing `.env.example` variables and start the backend/frontend per
@@ -89,6 +91,27 @@ Verify one real returned pair before claiming integration success:
 
 Requests can be slow: ERA5 has a 60-second local budget; Sentinel catalog and
 Process requests are bounded but may add several minutes when retries on alternate
-candidates are needed. Evidence is currently stored inline (PNG data URIs) for
-this proof of concept. Strict full-coverage/source checks can reject partial or
+candidates are needed. Strict full-coverage/source checks can reject partial or
 ambiguous mosaics; do not weaken these checks merely to obtain a success banner.
+
+## Preview storage
+
+New live detections save PNGs to `data/raw/live/previews/<detection_id>_<kind>.png`.
+The existing `data/raw/` gitignore rule covers this directory. `supplementary_json`
+keeps the same preview field names with `/api/previews/<filename>` references;
+the frontend resolves them against its existing API base. Existing inline data
+URIs continue to render and are never migrated on startup or read.
+
+`src/api/preview_storage.py::MAX_PREVIEW_FILES` configures the 500-file cap.
+Cleanup evicts the oldest owned PNGs after each batch, breaking timestamp ties by
+filename. It does not remove raw TIFFs, masks or historical database rows. This
+is a file-count cap, not a byte limit or whole-detection retention guarantee.
+Old references can return HTTP 404 after eviction; the UI shows preview
+unavailability. Cleanup and disk writes degrade gracefully if storage fails.
+
+The HTTP storage tests use real PNG encoding, disposable files/SQLite and actual
+FastAPI routes, with explicit satellite-service doubles. The browser script uses
+intercepted responses and test graphics. Neither establishes a real satellite
+fetch. `/api/predict` does not create supplementary previews: the six holdout
+requests in the handoff are inference regression checks, separate from storage
+verification. They require the named TIFFs to be present locally.

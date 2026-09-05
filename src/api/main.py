@@ -18,6 +18,7 @@ import cv2
 import tifffile
 import torch
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, model_validator
 
@@ -43,6 +44,8 @@ from src.data.cdse_fetch import find_best_product, fetch_scene_geotiff, CdseFetc
 from src.analysis.gfw_client import get_nearby_vessels
 from src.analysis.era5_wind_check import get_wind_evidence
 from src.data.sentinel2_optical import get_optical_evidence
+from src.api.preview_storage import (discard_inline_previews, is_safe_preview_directory,
+                                     is_safe_preview_filename, persist_previews, preview_directory)
 
 # Real Sentinel-1 GRD ground sampling distance, confirmed directly from the
 # holdout GeoTIFFs' ModelPixelScaleTag (consistent across all 30 scenes checked:
@@ -145,6 +148,25 @@ def health_check():
         "model_loaded": model_loaded,
         "device": str(device)
     }
+
+
+@app.get("/api/previews/{filename}", response_class=FileResponse)
+def get_preview(filename: str):
+    """Serve only PNG previews created by the live supplementary pipeline."""
+    if not is_safe_preview_filename(filename):
+        raise HTTPException(status_code=404, detail="Preview not found")
+    preview_root = preview_directory(BASE_DIR)
+    path = preview_root / filename
+    try:
+        # Resolve both sides so a pre-existing symlink cannot escape the cache.
+        if (not is_safe_preview_directory(preview_root, BASE_DIR) or path.is_symlink()
+                or path.resolve(strict=False).parent != preview_root.resolve(strict=False)):
+            raise HTTPException(status_code=404, detail="Preview not found")
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Preview not found")
+    except OSError:
+        raise HTTPException(status_code=404, detail="Preview not found")
+    return FileResponse(path, media_type="image/png")
 
 @app.get("/api/detections")
 def get_detections():
@@ -646,6 +668,15 @@ def live_fetch(payload: LiveFetchRequest):
                                                           window_days=payload.optical_window_days)
         except Exception as exc:
             supplementary['optical'] = {'status': 'unavailable', 'reason': f'Optical analysis failed ({type(exc).__name__}).'}
+    # Convert only this new detection's previews before serializing evidence.
+    try:
+        persist_previews(supplementary, det_id, BASE_DIR)
+    except Exception as exc:
+        # The primary INSERT is already committed; an unexpected storage
+        # boundary failure must still not turn it into a 500 or retain a
+        # base64 fallback in the new row.
+        discard_inline_previews(supplementary, type(exc).__name__)
+        print(f"[!] Preview storage degraded for detection {det_id} ({type(exc).__name__}).", file=sys.stderr)
     # Persisting optional evidence must not take down a detection that has
     # already committed -- same rule as every supplementary call above. Two
     # things can fail here: json.dumps(allow_nan=False) refuses a non-finite

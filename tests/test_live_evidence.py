@@ -196,7 +196,7 @@ def test_actual_checkpoint_in_shared_live_analysis(api, live_payload, monkeypatc
     original = result['detection']['supplementary']['original']
     assert 0 <= original['confidence_score'] <= 1
     assert 0 <= original['predicted_pixel_count'] <= 256 * 256
-    assert original['overlay_preview'].startswith('data:image/png;base64,')
+    assert original['overlay_preview'].startswith('/api/previews/')
 
 
 def test_live_missing_credentials_and_invalid_request(api, live_payload, monkeypatch):
