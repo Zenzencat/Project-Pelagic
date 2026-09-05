@@ -139,7 +139,8 @@ def test_landmask_removal_and_filter_suppression_are_empty_but_default_is_unchan
     full = np.ones((8, 8), dtype=np.uint8)
     set_inference(api, full, monkeypatch)
     monkeypatch.setattr(api, "get_scene_geolocation", lambda path: {
-        "center_lat": 9.0, "center_lon": 100.5, "pixel_scale_deg": 0.001,
+        "center_lat": 9.0, "center_lon": 100.5,
+        "pixel_scale_deg": 0.001, "pixel_scale_y_deg": 0.001,
         "min_lat": 8.9, "min_lon": 100.4, "max_lat": 9.1, "max_lon": 100.6,
     })
     monkeypatch.setattr(api, "strip_land_pixels", lambda mask, *args, **kwargs: (np.zeros_like(mask), {"oil_px_removed_on_land": 64}))

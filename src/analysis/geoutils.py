@@ -68,5 +68,13 @@ def get_scene_geolocation(tif_path):
         "max_lat": max_lat,
         "min_lon": min_lon,
         "max_lon": max_lon,
+        # "pixel_scale_deg" is ScaleX (longitude). It is NOT safe to reuse it
+        # for latitude: the two are equal on every Trujillo-Acatitla holdout
+        # scene, but a live Sentinel Hub Process scene is resampled to a fixed
+        # width/height, so ScaleY differs whenever the requested bbox is not
+        # square in degrees. Callers that convert rows to latitude want
+        # "pixel_scale_y_deg" -- see src/analysis/landmask.py::strip_land_pixels
+        # and src/analysis/contour.py::mask_to_polygons.
         "pixel_scale_deg": scale_x,
+        "pixel_scale_y_deg": scale_y,
     }

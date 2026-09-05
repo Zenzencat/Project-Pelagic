@@ -301,14 +301,13 @@ def predict(payload: PredictRequest):
         has_real_geo = False
     H, W = preds.shape
 
-    # get_scene_geolocation() only returns the GeoTIFF's ScaleX as
-    # "pixel_scale_deg", so derive the latitude degrees-per-pixel from the
-    # real corner bounds instead of assuming square pixels. For every cached
-    # holdout scene ScaleY == ScaleX, so this is a no-op there; it matters for
-    # any scene whose bbox isn't square in degrees. Both the land mask and the
-    # contour tracing below must use the SAME scale_y or they end up on two
-    # different latitude grids -- see strip_land_pixels' docstring.
-    scale_y = (geo["max_lat"] - geo["min_lat"]) / H if has_real_geo else scale
+    # "pixel_scale_deg" is ScaleX only; latitude needs the GeoTIFF's own
+    # ScaleY. Every cached holdout scene has ScaleY == ScaleX, so this is a
+    # no-op there; it matters for any scene whose bbox isn't square in degrees.
+    # Both the land mask and the contour tracing below must use the SAME
+    # scale_y or they end up on two different latitude grids -- see
+    # strip_land_pixels' docstring.
+    scale_y = geo["pixel_scale_y_deg"] if has_real_geo else scale
 
     # Land-sea masking (src/analysis/landmask.py): strip predicted "oil"
     # pixels that fall on land before contour extraction, so a SAR dark-
@@ -460,7 +459,7 @@ def _analyze_live_scene(img_path, scene_id, product, provenance):
     # Live Process scenes are resampled to a fixed width/height, so ScaleY != ScaleX
     # whenever the requested bbox isn't square in degrees. The land mask and the
     # contours must share this, or they land on two different latitude grids.
-    scale_y = (geo['max_lat'] - geo['min_lat']) / preds_bin.shape[0]
+    scale_y = geo['pixel_scale_y_deg']
     preds, land_stats = strip_land_pixels(preds_bin * 255, center_lat, center_lon, scale,
                                           bbox=bbox, scale_y=scale_y)
     # Separate rings match the existing frontend contract. No placeholder for an empty mask.
