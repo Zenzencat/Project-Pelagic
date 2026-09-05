@@ -107,12 +107,21 @@ def verify_real_images():
 # STEP 3: PREPROCESSING & OPTIMIZED PATCH LOADING (MEMORY SAFE)
 # -------------------------------------------------------------
 # WARNING: Synced copy of src/data/preprocess.py (calibrate_to_sigma, speckle_filter,
-# to_decibels, normalize_image, extract_patches_balanced, run_full_preprocessing) and
-# src/data/dataset.py (get_real_dataloaders). Kaggle kernels must be a single
-# self-contained file, so these can't be imported directly the way the rest of this
-# codebase does — if you change the category oversampling rates, the hard-fail
-# behavior, or the dB-scale handling in either src/data/preprocess.py or
-# src/data/dataset.py, mirror the change here too, and vice versa.
+# to_decibels, normalize_image, preprocess_for_prediction, extract_patches_balanced,
+# run_full_preprocessing) and src/data/dataset.py (get_real_dataloaders). Kaggle
+# kernels must be a single self-contained file, so these can't be imported directly
+# the way the rest of this codebase does — if you change the category oversampling
+# rates, the hard-fail behavior, or the dB-scale handling in either
+# src/data/preprocess.py or src/data/dataset.py, mirror the change here too, and
+# vice versa.
+#
+# Last sync: 2026-09-05, mirroring run_full_preprocessing()'s delegation to
+# preprocess_for_prediction() (src/data/preprocess.py). That added a dB-vs-linear
+# branch on np.any(image_raw < 0). This kernel only ever sees the real 2048x2048
+# dB-scale Sentinel-1 dataset — STEP 2's hard verification refuses anything else —
+# so the branch always takes the dB path and the numbers are byte-identical to what
+# trained checkpoints/model_real_v2_best.pt. It is mirrored anyway so the two copies
+# stay diffable.
 def calibrate_to_sigma(image_dn, calibration_constant=1.0):
     return (image_dn.astype(np.float32) ** 2) * calibration_constant
 
@@ -170,23 +179,27 @@ def extract_patches_balanced(image, mask, patch_size=256, stride=128, category="
                         
     return image_patches, mask_patches
 
-def run_full_preprocessing(image_raw, mask_raw, patch_size=256, stride=128, category="oil"):
+def preprocess_for_prediction(image_raw, already_calibrated=False):
+    # Branches on np.any(image_raw < 0) to tell already-dB-scale real Sentinel-1
+    # imagery from linear-scale data. This kernel's inputs are always the former.
     if len(image_raw.shape) == 3 and image_raw.shape[0] == 2:
         image_raw = image_raw.transpose(1, 2, 0)
-        
-    # Convert already-dB input back to linear space for speckle filtering
-    linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
-    
-    # Apply speckle filter in linear space
-    filtered = speckle_filter(linear, window_size=5)
-    
-    # Convert back to decibels
-    db = 10.0 * np.log10(np.clip(filtered, 1e-5, None))
-    
-    # Normalize to [0.0, 1.0] range
-    min_db, max_db = -25.0, 0.0
-    norm = (np.clip(db, min_db, max_db) - min_db) / (max_db - min_db)
-    
+
+    if np.any(image_raw < 0):
+        # Already in dB scale (the real Sentinel-1 training/holdout imagery).
+        # Back to linear for speckle filtering, then to dB, then normalize.
+        linear = 10.0 ** (image_raw.astype(np.float32) / 10.0)
+        filt = speckle_filter(linear, window_size=5)
+        db = 10.0 * np.log10(np.clip(filt, 1e-5, None))
+        return normalize_image(db)
+    else:
+        sig = image_raw.astype(np.float32) if already_calibrated else calibrate_to_sigma(image_raw)
+        filt = speckle_filter(sig, window_size=5)
+        db = to_decibels(filt)
+        return normalize_image(db)
+
+def run_full_preprocessing(image_raw, mask_raw, patch_size=256, stride=128, category="oil"):
+    norm = preprocess_for_prediction(image_raw)
     return extract_patches_balanced(norm, mask_raw, patch_size, stride, category)
 class SARDataset(Dataset):
     def __init__(self, image_patches, mask_patches, augment=False):
