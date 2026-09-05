@@ -34,9 +34,10 @@ scene. Requires CDSE credentials plus CDS credentials and dataset license
 acceptance. Then verify a real different-date SAR comparison and SAR/optical
 pair. Do not infer these passes from the local fixtures or public catalog.
 
-Task 4 remains stopped at its previously documented viability hard stop; no
-DSen2-CR integration or inference is claimed. The optional experiment was not
-restarted in this continuation.
+Task 4 was stopped for good by explicit user decision (no resources to train
+or evaluate the model), after a re-check found the official Dockerfile's
+`nvidia/cuda:9.0-cudnn7-devel` base image no longer exists on Docker Hub. No
+DSen2-CR integration, import or inference was ever established.
 
 ## Task 1 — ERA5 wind evidence
 
@@ -125,27 +126,38 @@ restarted in this continuation.
 
 ## Task 4 — isolated DSen2-CR viability
 
-**Previously STOPPED at Checkpoint 1. Not retried in this continuation.**
+**Stopped for good, by explicit decision. Not to be retried without new
+instruction.**
 
 Prior bounded investigation read `docs/cloud_removal_scoping.md` and the official
 repository instructions. Target stack: Python 3.7, TensorFlow GPU 1.15.0,
-Keras 2.2.4, NumPy 1.17, h5py 2.10.0. No official weights were found locally.
-No import, instantiation, weight load or inference pass was established.
+Keras 2.2.4, NumPy 1.17, h5py 2.10.0.
 
-Previous attempted commands and failures (historical, not new checks):
+Previous attempted commands and failures (historical, superseded below):
 
 - `rtk proxy timeout 15s docker image inspect tensorflow/tensorflow:1.15.0-gpu-py3 --format '{{.Id}}'`
   failed with Docker socket permission denied; image availability was not proven.
 - `rtk proxy timeout 15s git clone --depth 1 https://github.com/ameraner/dsen2-cr.git /tmp/pelagic-dsen2cr-viability`
-  failed with `Could not resolve host: github.com`, exit 128. Network availability
-  has since changed; this is no longer evidence of a current DNS blocker.
-- Python 3.7/conda were absent from PATH. After a default-cache permission failure,
-  `rtk proxy uv --cache-dir /tmp/pelagic-uv-cache python find 3.7 --no-python-downloads --offline`
-  returned no interpreter, exit 2.
+  failed with `Could not resolve host: github.com`, exit 128.
+- Python 3.7/conda were absent from PATH; `uv python find 3.7 --offline` found
+  no interpreter.
 
-The hard-stop outcome concerns environment/bootstrap, not evidence the model is
-broken. No TensorFlow/Keras dependencies were added to Pelagic. Keep deferred
-while completing real-data verification of the higher-priority tracks.
+A later re-check found network and Docker access had both recovered: cloning
+`github.com/ameraner/dsen2-cr` into a scratch directory succeeded, and
+`docker pull tensorflow/tensorflow:1.15.0-gpu-py3` completed. But the official
+`Docker/Dockerfile` builds from `nvidia/cuda:9.0-cudnn7-devel`, and Docker Hub's
+tag list for `nvidia/cuda` no longer contains any `9.0`-tagged image — that
+exact base image is gone, confirmed via the registry API, independent of any
+local credential or permission issue. The `tensorflow/tensorflow:1.15.0-gpu-py3`
+fallback route remained open (untested past the pull) when the task was
+stopped.
+
+The user then stopped the task explicitly, citing lack of resources to train
+or productively evaluate the model even if Checkpoint 1 succeeded. No import,
+instantiation or weight load was attempted. The pulled image and cloned repo
+were deleted; no TensorFlow/Keras dependency was added to Pelagic, and nothing
+outside `/tmp` scratch space was touched. Per the loop's Task 4 rules, this is
+itself a complete, valid outcome — Task 4 was never required to succeed.
 
 ## Verification in this continuation
 
