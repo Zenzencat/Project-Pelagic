@@ -19,7 +19,7 @@ import tifffile
 import torch
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 try:
     from dotenv import load_dotenv
@@ -41,6 +41,8 @@ from src.analysis.lookalike_filter import classify_and_filter
 from src.analysis.cdse_auth import get_cdse_token, CdseAuthError
 from src.data.cdse_fetch import find_best_product, fetch_scene_geotiff, CdseFetchError
 from src.analysis.gfw_client import get_nearby_vessels
+from src.analysis.era5_wind_check import get_wind_evidence
+from src.data.sentinel2_optical import get_optical_evidence
 
 # Real Sentinel-1 GRD ground sampling distance, confirmed directly from the
 # holdout GeoTIFFs' ModelPixelScaleTag (consistent across all 30 scenes checked:
@@ -113,6 +115,26 @@ class LiveFetchRequest(BaseModel):
     date_from: str  # "YYYY-MM-DD"
     date_to: str    # "YYYY-MM-DD"
     radius_km: float = 10.0
+    include_era5: bool = False
+    include_optical: bool = False
+    optical_window_days: int = Field(default=10, ge=1, le=30)
+    optical_max_cloud_pct: float = Field(default=20, ge=0, le=100, allow_inf_nan=False)
+    include_temporal: bool = False
+    temporal_window_days: int = Field(default=30, ge=1, le=90)
+
+    @model_validator(mode="after")
+    def validate_region(self):
+        import math
+        from datetime import date
+        if not all(math.isfinite(v) for v in (self.min_lat, self.min_lon, self.max_lat, self.max_lon, self.radius_km)):
+            raise ValueError("Coordinates and radius must be finite")
+        if not (-90 <= self.min_lat < self.max_lat <= 90 and -180 <= self.min_lon < self.max_lon <= 180):
+            raise ValueError("Invalid bounding box; dateline-crossing regions must be split")
+        if date.fromisoformat(self.date_from) > date.fromisoformat(self.date_to):
+            raise ValueError("date_from must not follow date_to")
+        if self.radius_km <= 0:
+            raise ValueError("radius_km must be positive")
+        return self
 
 # 3. Routes
 @app.get("/health")
@@ -200,6 +222,7 @@ def get_detection_details(det_id: int):
         "cdse_product_id": det_row["cdse_product_id"],
         "vessel_attribution_status": det_row["vessel_attribution_status"],
         "vessel_search_radius_km": det_row["vessel_search_radius_km"],
+        "supplementary": json.loads(det_row["supplementary_json"] or "{}"),
         "nearby_vessels": vessels
     }
 
@@ -402,6 +425,83 @@ def predict(payload: PredictRequest):
     return response
 
 
+def _png_data_uri(image):
+    import base64
+    height, width = image.shape[:2]
+    factor = min(1, 640 / max(height, width))
+    if factor < 1:
+        image = cv2.resize(image, (round(width * factor), round(height * factor)), interpolation=cv2.INTER_AREA)
+    ok, data = cv2.imencode('.png', image)
+    if not ok:
+        raise ValueError('Could not encode observation preview')
+    return 'data:image/png;base64,' + base64.b64encode(data).decode('ascii')
+
+
+def _analyze_live_scene(img_path, scene_id, product, provenance):
+    """One primary/comparison pipeline: calibration, U-Net, land mask, contours."""
+    image_raw = tifffile.imread(img_path)
+    norm = preprocess_for_prediction(image_raw, already_calibrated=True)
+    probs, preds_bin = run_tiled_inference(model, norm, device)
+    if not np.isfinite(probs).all():
+        raise ValueError('Inference returned nonfinite probabilities')
+    geo = get_scene_geolocation(img_path)
+    bbox = [geo['min_lat'], geo['min_lon'], geo['max_lat'], geo['max_lon']]
+    center_lat, center_lon, scale = geo['center_lat'], geo['center_lon'], geo['pixel_scale_deg']
+    preds, land_stats = strip_land_pixels(preds_bin * 255, center_lat, center_lon, scale, bbox=bbox)
+    # Separate rings match the existing frontend contract. No placeholder for an empty mask.
+    polygons = mask_to_polygons(preds, center_lat, center_lon, scale,
+                               scale_y=(geo['max_lat'] - geo['min_lat']) / preds.shape[0])
+    slick_pixels = probs[preds == 255]
+    confidence = float(np.mean(slick_pixels)) if len(slick_pixels) else 0.0
+    mask_dir = os.path.join(BASE_DIR, 'data', 'processed')
+    os.makedirs(mask_dir, exist_ok=True)
+    if not cv2.imwrite(os.path.join(mask_dir, f'{scene_id}_mask.png'), preds):
+        raise ValueError('Could not save segmentation mask')
+    # Fixed VV dB display stretch makes different passes visually comparable.
+    vv_db = 10 * np.log10(np.maximum(image_raw[:, :, 0], 1e-10))
+    gray = (np.clip((vv_db + 25) / 25, 0, 1) * 255).astype(np.uint8)
+    overlay = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    overlay[preds == 255] = (0.45 * overlay[preds == 255] + 0.55 * np.array([0, 215, 255])).astype(np.uint8)
+    return ({'scene_id': scene_id, 'product': product, 'acquisition_start_utc': product['start'],
+             'acquisition_end_utc': product['end'], 'source': 'Sentinel-1 GRD / CDSE Process',
+             'provenance': provenance, 'bbox': bbox,
+             'pixel_sha256': hashlib.sha256(image_raw.tobytes()).hexdigest(),
+             'confidence_score': confidence, 'predicted_pixel_count': int((preds == 255).sum()),
+             'geojson_mask': {'type': 'Polygon', 'coordinates': polygons},
+             'sar_preview': _png_data_uri(gray), 'overlay_preview': _png_data_uri(overlay),
+             'preview_note': 'VV sigma0, fixed -25 to 0 dB stretch; yellow is the U-Net mask after land masking.'},
+            geo, land_stats)
+
+
+def _temporal_evidence(token, product, original, payload):
+    from src.analysis.sentinel1_revisit_check import search_same_track_passes, select_comparison_products
+    bbox = original['bbox']
+    try:
+        candidates = search_same_track_passes(bbox[0], bbox[2], bbox[1], bbox[3], product['start'],
+                                            window_days=payload.temporal_window_days)
+        candidates = select_comparison_products(candidates, product, bbox, payload.temporal_window_days)
+    except Exception as exc:
+        return {'status': 'unavailable', 'reason': f'Comparison search failed ({type(exc).__name__}).'}
+    if not candidates:
+        return {'status': 'no_match', 'reason': 'No comparison available with full footprint and a different acquisition date.'}
+    failures = []
+    # A bounded attempt on at most two candidates, returning one useful comparison.
+    for candidate in candidates[:2]:
+        try:
+            scene_id = f'comparison_{uuid.uuid4().hex[:12]}'
+            path = os.path.join(BASE_DIR, 'data', 'raw', 'live', f'{scene_id}.tif')
+            provenance = fetch_scene_geotiff(token, *bbox, candidate['start'], path, product=candidate)
+            comparison, _, _ = _analyze_live_scene(path, scene_id, candidate, provenance)
+            if comparison['pixel_sha256'] == original['pixel_sha256']:
+                raise ValueError('Comparison pixels duplicate the original observation')
+            return {'status': 'available', 'observations': [comparison], 'attempt_failures': failures,
+                    'window_days': payload.temporal_window_days,
+                    'reason': 'Different-date observation. Orbit, sea state and geometry may differ; no change classification is inferred.'}
+        except Exception as exc:
+            failures.append({'product_id': candidate['id'], 'reason': f'Fetch/inference/validation failed ({type(exc).__name__}).'})
+    return {'status': 'unavailable', 'reason': 'Comparison candidates found, but fetch/inference/validation failed.', 'attempt_failures': failures}
+
+
 @app.post("/api/live/fetch")
 def live_fetch(payload: LiveFetchRequest):
     """
@@ -459,65 +559,22 @@ def live_fetch(payload: LiveFetchRequest):
     img_path = os.path.join(live_dir, f"{scene_id}.tif")
 
     try:
-        fetch_scene_geotiff(
+        provenance = fetch_scene_geotiff(
             token, payload.min_lat, payload.min_lon, payload.max_lat, payload.max_lon,
-            product["start"], img_path,
+            product["start"], img_path, product=product,
         )
     except CdseFetchError as e:
         return {"status": "ERROR", "detail": f"CDSE Process API fetch failed: {e}", "detection": None}
 
-    # 3. Read + preprocess (shared with /api/predict) + tiled inference
+    # Same analysis function is used for primary and comparison observations.
     try:
-        image_raw = tifffile.imread(img_path)
-    except Exception as e:
-        return {"status": "ERROR", "detail": f"Error reading fetched GeoTIFF: {e}", "detection": None}
-
-    norm = preprocess_for_prediction(image_raw, already_calibrated=True)
-    probs, preds_bin = run_tiled_inference(model, norm, device)
-    preds = preds_bin * 255
-
-    try:
-        geo = get_scene_geolocation(img_path)
-    except ValueError as e:
-        return {"status": "ERROR", "detail": f"Fetched scene has no embedded georeferencing: {e}", "detection": None}
-    center_lat, center_lon, scale = geo["center_lat"], geo["center_lon"], geo["pixel_scale_deg"]
-    scene_bbox = (geo["min_lat"], geo["min_lon"], geo["max_lat"], geo["max_lon"])
-    H, W = preds.shape
-
-    # Land-sea masking (src/analysis/landmask.py): live-fetched scenes cover
-    # arbitrary real-world bboxes (unlike the curated cached demo scenes,
-    # pre-verified as open water), so a SAR dark-backscatter false positive
-    # over land is a real, expected risk here -- strip it at the pixel level
-    # before contour extraction so the reported polygon/area/confidence are
-    # all corrected, not just the map drawing. Always applicable here since
-    # geo above is always real (the except branch above already returned).
-    # bbox enables the real-OSM island refinement (src/analysis/osm_coastline.py,
-    # Round 16) on top of the ~930m raster (Round 15).
-    preds, land_stats = strip_land_pixels(preds, center_lat, center_lon, scale, bbox=scene_bbox)
-
-    polygons = mask_to_polygons(preds, center_lat, center_lon, scale)
-    if not polygons:
-        polygons = [[
-            [center_lon - 0.01, center_lat - 0.01],
-            [center_lon + 0.01, center_lat - 0.01],
-            [center_lon + 0.01, center_lat + 0.01],
-            [center_lon - 0.01, center_lat + 0.01],
-            [center_lon - 0.01, center_lat - 0.01],
-        ]]
-    geojson = {"type": "Polygon", "coordinates": polygons}
-
-    slick_pixels = probs[preds == 255]
-    confidence_score = float(np.mean(slick_pixels)) if len(slick_pixels) > 0 else 0.0
-
-    processed_mask_dir = os.path.join(BASE_DIR, "data", "processed")
-    os.makedirs(processed_mask_dir, exist_ok=True)
+        observation, geo, land_stats = _analyze_live_scene(img_path, scene_id, product, provenance)
+    except Exception as exc:
+        return {"status": "ERROR", "detail": f"Live scene inference/validation failed ({type(exc).__name__}).", "detection": None}
+    center_lat, center_lon = geo['center_lat'], geo['center_lon']
+    bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon = observation['bbox']
+    confidence_score, geojson = observation['confidence_score'], observation['geojson_mask']
     mask_png_name = f"{scene_id}_mask.png"
-    cv2.imwrite(os.path.join(processed_mask_dir, mask_png_name), preds)
-
-    bbox_min_lat = center_lat - (H // 2) * scale
-    bbox_min_lon = center_lon - (W // 2) * scale
-    bbox_max_lat = center_lat + (H // 2) * scale
-    bbox_max_lon = center_lon + (W // 2) * scale
 
     # 4. Real GFW attribution -- possible here (unlike /api/predict's cached
     # holdout/synthetic scenes) because this detection has a real acquisition
@@ -556,6 +613,29 @@ def live_fetch(payload: LiveFetchRequest):
             (det_id, v["mmsi"], v["vessel_name"], v["latitude"], v["longitude"], v["timestamp"], v["distance_meters"], v["position_resolution_m"])
             for v in gfw_result["vessels"]
         ])
+    conn.commit()
+    conn.close()
+
+    supplementary = {"original": observation, "era5": {"status": "skipped", "reason": "ERA5 was not requested."}}
+    if payload.include_era5:
+        try:
+            supplementary["era5"] = get_wind_evidence(center_lat, center_lon, product["start"])
+        except Exception as exc:
+            supplementary["era5"] = {"status": "unavailable", "reason": f"ERA5 analysis failed ({type(exc).__name__})."}
+    supplementary['temporal'] = {'status': 'skipped', 'reason': 'Temporal comparison was not requested.'}
+    if payload.include_temporal:
+        supplementary['temporal'] = _temporal_evidence(token, product, observation, payload)
+    supplementary['optical'] = {'status': 'skipped', 'reason': 'Optical supplement was not requested.'}
+    if payload.include_optical:
+        try:
+            supplementary['optical'] = get_optical_evidence(token, observation['bbox'], product['start'],
+                                                          max_cloud_pct=payload.optical_max_cloud_pct,
+                                                          window_days=payload.optical_window_days)
+        except Exception as exc:
+            supplementary['optical'] = {'status': 'unavailable', 'reason': f'Optical analysis failed ({type(exc).__name__}).'}
+    conn = get_db_connection()
+    conn.execute("UPDATE detections SET supplementary_json = ? WHERE id = ?",
+                 (json.dumps(supplementary, allow_nan=False), det_id))
     conn.commit()
     conn.close()
 

@@ -37,6 +37,7 @@ erDiagram
     text cdse_product_id
     text vessel_attribution_status
     real vessel_search_radius_km
+    text supplementary_json
   }
 
   NEARBY_VESSELS {
@@ -94,7 +95,11 @@ CREATE TABLE detections (
                                              -- instead of a silent "0 vessels" that looks identical
                                              -- to "never checked." Replaces the old hardcoded
                                              -- mock_vessels this project shipped with previously.
-    vessel_search_radius_km REAL            -- Radius used for the GFW query, for 'live' detections.
+    vessel_search_radius_km REAL,           -- Radius used for the GFW query, for 'live' detections.
+    supplementary_json TEXT                -- Optional evidence: original SAR metadata/previews,
+                                             -- era5 status/components/provenance, temporal comparisons,
+                                             -- optical status/date/cloud metadata/RGB preview.
+                                             -- NULL for legacy rows. Exposed as supplementary on details.
 );
 
 -- Table: nearby_vessels

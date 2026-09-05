@@ -1,49 +1,11 @@
-"""
-Project Pelagic — Multi-Temporal SAR Comparison (standalone analysis, NOT wired
-into the live pipeline)
-SWU Prasarnmit AI Engineering Final Project
+"""Sentinel-1 catalog search and different-date comparison candidate selection.
 
-Real oil slicks drift and change shape between passes (current/wind advect them);
-many look-alikes (biogenic films pinned to a source, wind-shadow zones, current
-fronts) hold a static shape and location. This module searches the Copernicus Data
-Space Ecosystem (CDSE) catalog for a same-area Sentinel-1 acquisition near a scene's
-reference date, and — once a second pass is actually downloaded and run through the
-model — compares the two detected polygons to flag `static_across_passes` as a
-look-alike-likely signal.
-
-STATUS:
-  - CDSE's OData catalog *search* is public, no auth required (verified directly
-    against https://catalogue.dataspace.copernicus.eu/odata/v1/Products). Actually
-    *downloading* a matched product does require a free CDSE account + OAuth2
-    client credentials (register at https://dataspace.copernicus.eu), which are
-    not configured in this environment.
-  - More fundamentally, same as src/analysis/era5_wind_check.py: this dataset has
-    no acquisition timestamp for any of the 30 holdout scenes (verified against
-    all three Zenodo deposits directly), so there is no reference date to search
-    "before/after" in the first place. search_same_track_passes() below works and
-    was validated with real coordinates, but only answers "how much Sentinel-1
-    coverage exists at this location in general" (see
-    docs/sentinel1_coverage_density.json), not "does THIS scene have a matched
-    second pass" -- that needs a real timestamp per scene.
-  - Sentinel-1 revisit cadence: verified via dataspace.copernicus.eu -- the
-    2026 constellation reconfiguration (Sentinel-1C + Sentinel-1D, completed
-    2026-06-24) restored a ~6-day nominal same-track revisit, not the ~12-day
-    figure that held during the single-satellite gap. Do not assume 12 days.
-
-Shape-comparison choice: centroid-drift + area-change, not polygon IoU. IoU
-between two independently-thresholded detections is sensitive to small boundary
-noise even for a genuinely static object (see the whole-image-vs-tiled inference
-investigation in a prior session, where ~25% of a tiny false-positive blob's
-pixels disagreed between two runs of the *same* scene for boundary-noise reasons
-alone) -- centroid position + total area are coarser but much more robust to that
-noise, and are what the underlying hypothesis (drift vs static) actually needs.
+Live comparisons reuse the primary fetch/inference pipeline. The older standalone
+shape heuristic remains for reproducibility and is not used by the live UI/API.
+Historical holdout scenes still have no acquisition timestamps.
 """
 
 import time
-
-import requests
-
-CDSE_ODATA_URL = "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
 
 # Nominal same-track repeat cycle post-2026 reconfiguration (Sentinel-1C + 1D).
 # Source: https://dataspace.copernicus.eu/news/2026-5-28-sentinel-1-orbital-reconfiguration-dates
@@ -62,51 +24,46 @@ def search_same_track_passes(min_lat, max_lat, min_lon, max_lon, reference_date_
     scene's specific acquisition" -- used by the coverage pre-check since no
     reference date exists for this dataset.
 
-    Returns a list of dicts: [{"id", "name", "start", "end", "footprint"}, ...],
-    real API results, no auth needed for search. "id" is the OData product
-    UUID -- required to actually download a product (see src/data/cdse_fetch.py),
-    not needed by this module's own revisit-comparison use case, but harmless
-    to include for callers that reuse this search function for that purpose.
+    Returns real catalog identity, start/end, footprints and attributes. Search
+    does not itself guarantee same track; select_comparison_products ranks
+    compatible alternate-date observations using the returned attributes.
+    Network or incomplete catalog responses raise; no scenes are fabricated.
     """
-    bbox_wkt = (
-        f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, "
-        f"{max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
-    )
+    from datetime import datetime, timedelta, timezone
+    from src.data.observation_catalog import query_products, acquisition_time
+    ref = acquisition_time(reference_date_iso) if reference_date_iso else datetime.now(timezone.utc)
+    start = ref - timedelta(days=window_days if reference_date_iso else 365)
+    end = ref + timedelta(days=window_days) if reference_date_iso else ref
+    if product_type != "GRD":
+        raise ValueError("Only Sentinel-1 GRD is supported")
+    return query_products((min_lat, min_lon, max_lat, max_lon),
+                          start.isoformat(), end.isoformat(), 'SENTINEL-1', "contains(Name,'GRD')")
 
-    if reference_date_iso:
-        from datetime import datetime, timedelta
-        ref = datetime.fromisoformat(reference_date_iso)
-        start = (ref - timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        end = (ref + timedelta(days=window_days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    else:
-        # No reference date available for this dataset -- fall back to a
-        # trailing 12-month window purely to gauge coverage density.
-        from datetime import datetime, timedelta
-        now = datetime.utcnow()
-        start = (now - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        end = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-    filt = (
-        f"Collection/Name eq 'SENTINEL-1' and "
-        f"OData.CSC.Intersects(area=geography'SRID=4326;{bbox_wkt}') and "
-        f"contains(Name,'{product_type}') and "
-        f"ContentDate/Start gt {start} and ContentDate/Start lt {end}"
-    )
-
-    r = requests.get(CDSE_ODATA_URL, params={"$filter": filt, "$top": 50}, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-
-    return [
-        {
-            "id": p["Id"],
-            "name": p["Name"],
-            "start": p["ContentDate"]["Start"],
-            "end": p["ContentDate"].get("End"),
-            "footprint": p.get("Footprint"),
-        }
-        for p in data.get("value", [])
-    ]
+def select_comparison_products(products, original, bbox, window_days=30):
+    """Different UTC date, full footprint, compatible VV/VH IW GRD; no verdict."""
+    from src.data.observation_catalog import acquisition_time, valid_product, covers_bbox
+    ref = acquisition_time(original["start"])
+    candidates = []
+    seen = {original["id"]}
+    for product in products:
+        if not valid_product(product) or product['id'] in seen or product['name'] == original['name']:
+            continue
+        time = acquisition_time(product['start'])
+        if time.date() == ref.date() or abs((time - ref).total_seconds()) > window_days * 86400:
+            continue
+        if '_IW_GRDH_1SDV_' not in product['name'] or not covers_bbox(product, bbox):
+            continue
+        seen.add(product['id'])
+        candidates.append(product)
+    def rank(product):
+        attrs, ref_attrs = product.get('attributes', {}), original.get('attributes', {})
+        same_track = (ref_attrs.get('relativeOrbitNumber') is not None and
+                      attrs.get('relativeOrbitNumber') == ref_attrs['relativeOrbitNumber'])
+        same_direction = (ref_attrs.get('orbitDirection') is not None and
+                          attrs.get('orbitDirection') == ref_attrs['orbitDirection'])
+        return (not same_track, not same_direction, abs((acquisition_time(product['start']) - ref).total_seconds()))
+    return sorted(candidates, key=rank)
 
 
 def coverage_density_precheck(scene_coords, window_days_year=365):

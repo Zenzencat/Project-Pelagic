@@ -119,6 +119,11 @@ def init_db():
         cursor.execute("ALTER TABLE nearby_vessels ADD COLUMN position_resolution_m REAL;")
         conn.commit()
 
+    # Optional evidence survives history/detail refreshes; legacy rows stay null.
+    if "supplementary_json" not in existing_cols:
+        cursor.execute("ALTER TABLE detections ADD COLUMN supplementary_json TEXT;")
+        conn.commit()
+
     # 3. Seed mock data if empty
     cursor.execute("SELECT COUNT(*) FROM detections;")
     if cursor.fetchone()[0] == 0:

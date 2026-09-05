@@ -74,6 +74,7 @@ def mask_to_polygons(
     epsilon_frac=DEFAULT_EPSILON_FRAC,
     chaikin_iterations=DEFAULT_CHAIKIN_ITERATIONS,
     round_decimals=DEFAULT_ROUND_DECIMALS,
+    scale_y=None,
 ):
     """Trace a binary (0/255) mask into closed [lon, lat] polygon rings.
 
@@ -83,6 +84,7 @@ def mask_to_polygons(
     the scene's real per-pixel degree size.
     """
     H, W = mask.shape
+    scale_y = scale if scale_y is None else scale_y
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     polygons = []
@@ -99,7 +101,7 @@ def mask_to_polygons(
 
         poly_pts = []
         for x, y in pts:
-            lat = center_lat + (H // 2 - y) * scale
+            lat = center_lat + (H // 2 - y) * scale_y
             lon = center_lon + (x - W // 2) * scale
             poly_pts.append([round(float(lon), round_decimals), round(float(lat), round_decimals)])
 

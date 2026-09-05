@@ -1,38 +1,8 @@
-"""
-Project Pelagic — ERA5 Wind Cross-Check (standalone analysis, NOT wired into the
-live pipeline)
-SWU Prasarnmit AI Engineering Final Project
+"""Optional ERA5 10 m wind evidence for live acquisitions.
 
-Oil slicks dampen capillary waves and only produce a visible dark SAR signature
-within roughly 1.5-6 m/s surface wind speed: below that, the sea is already too
-calm for wind roughness to contrast against (a "false-dark" look-alike risk);
-above it, wind-driven roughening breaks up the slick's dampening signature and
-also produces its own dark low-backscatter patches (wind shadow zones, current
-fronts) that mimic oil. This module cross-checks each detected polygon's location
-against the ERA5 10m wind speed at acquisition time and flags (does not suppress)
-detections outside that window as `low_confidence_wind_outlier`, with the actual
-wind speed attached.
-
-STATUS: the fetch/classify logic below is real, working code against the
-documented CDS API. It has NOT been run against real data yet because:
-  1. No CDS API key is configured in this environment (no ~/.cdsapirc, no
-     CDSAPI_KEY/CDSAPI_URL env vars, `cdsapi` package not installed). Register
-     for free at https://cds.climate.copernicus.eu, accept the ERA5
-     single-levels dataset license, then either write
-     ~/.cdsapirc as documented at https://cds.climate.copernicus.eu/how-to-api,
-     or set CDSAPI_URL / CDSAPI_KEY env vars.
-  2. More fundamentally: the 30 holdout scenes have real embedded lat/lon
-     (src/analysis/geoutils.py) but NO acquisition timestamp anywhere -- not in
-     the GeoTIFF tags, not as a companion file on any of the three Zenodo
-     records (verified directly via the Zenodo API's file listing for
-     8346860 / 8253899 / 13761290: each deposit is just the image + mask .7z
-     archives, nothing else). Without a timestamp there is no way to pick which
-     ERA5 timestep to query, for this dataset specifically. See docs/status.md.
-
-Do not fabricate timestamps to make this runnable -- if you have real
-acquisition times (e.g. from a source outside this repo), pass them in via
-`--timestamps-json` (see `main()` below) rather than editing them into this
-file.
+The live API exposes measured components, speed and provenance only. The older
+standalone heuristic below is retained for reproducibility and is NOT used by
+the live pipeline. Holdout scenes still need externally supplied timestamps.
 """
 
 import argparse
@@ -52,83 +22,130 @@ WIND_SPEED_MIN_MS = 1.5
 WIND_SPEED_MAX_MS = 6.0
 
 
-def fetch_era5_wind_speed(lat, lon, timestamp_iso, cds_client=None):
-    """
-    Fetches ERA5 10m wind speed (u/v components combined) for a given point and
-    time via the CDS API.
+DATASET = "reanalysis-era5-single-levels"
+RESOLUTION_NOTE = "ERA5 hourly reanalysis on a 0.25° grid (~28 km north-south); not local wind at Sentinel-1 pixel resolution."
 
-    Args:
-        lat, lon: decimal degrees, WGS84.
-        timestamp_iso: ISO 8601 datetime string, e.g. "2024-01-12T03:42:20".
-                        ERA5 is hourly, so this is rounded to the nearest hour.
-        cds_client: an existing cdsapi.Client(), or None to create one (requires
-                    ~/.cdsapirc or CDSAPI_URL/CDSAPI_KEY env vars to already be
-                    configured -- raises cdsapi's own error if not).
 
-    Returns:
-        float wind speed in m/s at that point/time.
+def wind_magnitude(u10, v10):
+    import math
+    if not all(math.isfinite(v) for v in (u10, v10)):
+        raise ValueError("ERA5 wind components must be finite")
+    return math.hypot(u10, v10)
 
-    Raises:
-        RuntimeError if the cdsapi package isn't installed.
-        Whatever cdsapi/requests raises on auth failure or a bad request.
-    """
-    if not CDSAPI_AVAILABLE:
-        raise RuntimeError(
-            "cdsapi is not installed. Run: pip install cdsapi "
-            "(see https://github.com/ecmwf/cdsapi)"
-        )
 
-    from datetime import datetime
-    dt = datetime.fromisoformat(timestamp_iso)
+def utc_datetime(value):
+    from datetime import datetime, timezone
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        raise ValueError("Acquisition datetime must include its UTC offset")
+    return dt.astimezone(timezone.utc)
 
-    client = cds_client or cdsapi.Client()
 
-    # CDS subsets by bounding box, not a literal point -- request a small box
-    # around the target and read the single nearest grid cell from the result.
-    # ERA5 single-levels is ~0.25deg native resolution, so 0.3deg padding on
-    # each side comfortably covers one grid cell regardless of point position.
-    pad = 0.3
-    area = [lat + pad, lon - pad, lat - pad, lon + pad]  # N, W, S, E
+def extract_wind_record(ds, lat, lon, hour):
+    """Reject mismatched times, distant cells, missing values and ambiguous arrays."""
+    import numpy as np
+    time_key = "valid_time" if "valid_time" in ds.coords else "time"
+    expected = np.datetime64(hour.replace(tzinfo=None), "ns")
+    # Exact time selection: a different hour must never masquerade as requested data.
+    point = ds.sel({time_key: expected})
+    longitudes = np.asarray(ds.longitude.values)
+    query_lon = lon % 360 if np.all(longitudes >= 0) else (lon + 180) % 360 - 180
+    point = point.sel(latitude=lat, longitude=query_lon, method="nearest")
+    cell_lat, cell_lon = float(point.latitude.values), float(point.longitude.values)
+    lon_distance = abs((cell_lon - lon + 180) % 360 - 180)
+    if not np.isfinite([cell_lat, cell_lon]).all() or abs(cell_lat - lat) > 0.26 or lon_distance > 0.26:
+        raise ValueError("ERA5 returned a grid cell outside the requested location")
+    values = []
+    for name in ("u10", "v10"):
+        variable = point[name]
+        if variable.attrs.get("units") not in ("m s**-1", "m s-1", "m/s"):
+            raise ValueError("ERA5 wind units missing or unsupported")
+        arr = np.asarray(variable.values)
+        if arr.size != 1:
+            raise ValueError("ERA5 returned ambiguous wind components")
+        values.append(float(arr.item()))
+    u10, v10 = values
+    return {"u10_ms": u10, "v10_ms": v10, "wind_speed_ms": wind_magnitude(u10, v10),
+            "valid_time_utc": hour.isoformat(), "grid_lat": cell_lat,
+            "grid_lon": (cell_lon + 180) % 360 - 180}
 
+
+def _retrieve_wind(lat, lon, timestamp_iso, cds_client=None):
+    from datetime import timedelta
     import tempfile
-    import os
-    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-        target_path = tmp.name
+    import xarray as xr
+    dt = utc_datetime(timestamp_iso)
+    hour = (dt + timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
+    client = cds_client or cdsapi.Client(timeout=15, retry_max=1, quiet=True, progress=False)
+    # Clamp at the dateline to keep the CDS bounding box valid.
+    west, east = max(-180, lon - 0.3), min(180, lon + 0.3)
+    with tempfile.TemporaryDirectory(prefix="pelagic-era5-") as directory:
+        from pathlib import Path
+        target = str(Path(directory) / "wind.nc")
+        client.retrieve(DATASET, {
+            "product_type": ["reanalysis"],
+            "variable": ["10m_u_component_of_wind", "10m_v_component_of_wind"],
+            "year": [f"{hour.year:04d}"], "month": [f"{hour.month:02d}"],
+            "day": [f"{hour.day:02d}"], "time": [f"{hour.hour:02d}:00"],
+            "area": [min(90, lat + 0.3), west, max(-90, lat - 0.3), east],
+            "grid": [0.25, 0.25], "data_format": "netcdf", "download_format": "unarchived",
+        }, target)
+        with xr.open_dataset(target) as ds:
+            return extract_wind_record(ds, lat, lon, hour)
 
+
+def _wind_worker(connection, lat, lon, timestamp):
     try:
-        client.retrieve(
-            "reanalysis-era5-single-levels",
-            {
-                "product_type": "reanalysis",
-                "variable": ["10m_u_component_of_wind", "10m_v_component_of_wind"],
-                "year": f"{dt.year:04d}",
-                "month": f"{dt.month:02d}",
-                "day": f"{dt.day:02d}",
-                "time": f"{dt.hour:02d}:00",
-                "area": area,
-                "format": "netcdf",
-            },
-            target_path,
-        )
-
-        import numpy as np
-        try:
-            import xarray as xr
-        except ImportError:
-            raise RuntimeError(
-                "xarray is required to read the ERA5 NetCDF response. "
-                "Run: pip install xarray netCDF4"
-            )
-
-        ds = xr.open_dataset(target_path)
-        u10 = ds["u10"].sel(latitude=lat, longitude=lon % 360, method="nearest").values
-        v10 = ds["v10"].sel(latitude=lat, longitude=lon % 360, method="nearest").values
-        speed = float(np.sqrt(u10**2 + v10**2))
-        ds.close()
-        return speed
+        connection.send({"status": "available", **_retrieve_wind(lat, lon, timestamp)})
+    except Exception as exc:
+        # Service exceptions may contain credentials/URLs. Do not serialize them.
+        connection.send({"status": "unavailable", "reason": f"ERA5 retrieval or response validation failed ({type(exc).__name__})."})
     finally:
-        if os.path.exists(target_path):
-            os.remove(target_path)
+        connection.close()
+
+
+def get_wind_evidence(lat, lon, timestamp_iso, *, timeout_seconds=60):
+    """Optional bounded retrieval. CDS queue delays cannot hold up inference forever."""
+    import math
+    import os
+    from pathlib import Path
+    base = {"source": DATASET, "resolution_note": RESOLUTION_NOTE,
+            "requested_lat": lat, "requested_lon": lon, "acquisition_time_utc": timestamp_iso}
+    try:
+        utc_datetime(timestamp_iso)
+        if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError("Invalid location")
+    except (ValueError, TypeError, AttributeError):
+        return {**base, "status": "skipped", "reason": "Real acquisition datetime with UTC offset and valid location required."}
+    rc = Path(os.environ.get("CDSAPI_RC", str(Path.home() / ".cdsapirc")))
+    if not ((os.environ.get("CDSAPI_KEY") and os.environ.get("CDSAPI_URL")) or rc.is_file()):
+        return {**base, "status": "not_configured", "reason": "Configure CDSAPI_URL and CDSAPI_KEY (or .cdsapirc)."}
+    if not CDSAPI_AVAILABLE:
+        return {**base, "status": "unavailable", "reason": "Optional cdsapi dependency is not installed."}
+    import multiprocessing
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(target=_wind_worker, args=(child, lat, lon, timestamp_iso), daemon=True)
+    try:
+        process.start()
+        child.close()
+        if parent.poll(timeout_seconds):
+            return {**base, **parent.recv()}
+        return {**base, "status": "unavailable", "reason": f"ERA5 request exceeded the {timeout_seconds}-second retrieval budget; CDS may still be queuing the request."}
+    except Exception as exc:
+        return {**base, "status": "unavailable", "reason": f"ERA5 worker failed ({type(exc).__name__})."}
+    finally:
+        if process.is_alive():
+            process.terminate()
+        if process.pid is not None:
+            process.join(timeout=2)
+        parent.close()
+        child.close()
+
+
+def fetch_era5_wind_speed(lat, lon, timestamp_iso, cds_client=None):
+    """Compatibility adapter for the standalone analysis; no synthetic fallback."""
+    return _retrieve_wind(lat, lon, timestamp_iso, cds_client)["wind_speed_ms"]
 
 
 def classify_wind_confidence(wind_speed_ms, low=WIND_SPEED_MIN_MS, high=WIND_SPEED_MAX_MS):
