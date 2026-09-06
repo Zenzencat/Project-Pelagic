@@ -5,20 +5,22 @@ Updated 2026-09-06 for the live external credential verification pass
 (CI, decoupled DB seeding, multi-temporal SAR, Sentinel-2 optical, calibration audit).
 Earlier research and historical verification remain in [status_history.md](status_history.md).
 
+2026-09-06: `prompt/pelagic-credential-verification.md` §5 (GFW AIS attribution)
+closed out — see "GFW AIS attribution" under Live credential verification.
+
 ## Current environment and scope
 
 - User-supplied CDSE client credentials and GFW token are configured in the
-  ignored local `.env` and **authenticated and verified** against live APIs.
-  `CDSAPI_KEY` for ERA5 wind was skipped by user request; ERA5 degrades cleanly
-  and honestly to `not_configured`.
-- Python is 3.11.9 on Windows (`.venv`).
-  All dependencies from `requirements.txt` are satisfied.
-  `pytest.ini` configures `pythonpath = .` for direct invocation.
+  ignored local `.env` and authenticated against live APIs (CDSE Process API
+  and GFW v3 4Wings API). `CDSAPI_KEY` for ERA5 wind was skipped by user request;
+  ERA5 degrades cleanly and honestly to `not_configured`.
+- Environment is Python 3.11.9 (`.venv`) on Windows. All dependencies from `requirements.txt`
+  are satisfied. `pytest.ini` configures `pythonpath = .` for direct invocation.
 - Real v2/v1 checkpoints and synthetic TIFFs are present. The requested
   `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs remain absent
   for offline holdout inference, but live CDSE fetching is completely functional.
 - This session verified live CDSE Sentinel-1 SAR acquisition, tiled U-Net inference,
-  OSM land masking, real GFW AIS vessel matching, multi-temporal revisit SAR, and
+  OSM land masking, GFW AIS vessel matching, multi-temporal revisit SAR, and
   Sentinel-2 true-color optical RGB. Previews are stored on disk under `data/raw/live/previews/`.
 
 ## Preview storage
@@ -120,11 +122,118 @@ revisits. First-ranked alternative:
 The other dates are July 29, September 3 and July 17, 2026.
 See [live_catalog_verification.json](live_catalog_verification.json).
 
-This historical catalog result is not an authenticated pixel-fetch test.
-The primary name ends in `_COG.SAFE`; real Process source-identifier
-compatibility remains unverified. Dates, source metadata, fixed-stretch SAR
-previews and segmentation are presented as evidence, without persistence or
-oil classification. Orbit/sea-state/resampling differences remain limitations.
+Dates, source metadata, fixed-stretch SAR previews and segmentation are
+presented as evidence, without persistence or oil classification.
+Orbit/sea-state/resampling differences remain limitations.
+
+### Live credential verification — real authenticated Process response (2026-09-05)
+
+Checked against a **real authenticated Sentinel Hub Process response**, not
+just static-scoped code. CDSE OAuth2 client credentials in `.env`
+authenticated successfully (`validate_credentials.py` CDSE check: PASS).
+
+Probe: `POST` to `sh.dataspace.copernicus.eu/api/v1/process` for bbox
+`[1.1, 103.7, 1.3, 103.9]`, selected primary
+`d514853f-fc94-4799-b40e-c44e81412d0b`
+(`S1D_IW_GRDH_1SDV_20260810T112444_20260810T112509_004062_007671_C8DC_COG.SAFE`).
+
+- **`_COG` product-name matching: no mismatch.** The Process API reports the
+  tile under the identical identifier the catalog uses:
+  `sentinel1ProductId` = `"S1D_..._C8DC_COG.SAFE"`. After the `.SAFE` strip both
+  sides are `S1D_..._C8DC_COG`; `verify_sources` accepts it. The earlier concern
+  that Process would return a non-COG identifier is disproven against a real
+  response.
+- **A different, real blocker was found and fixed.** With the sub-second catalog
+  `product['start']` (`...T11:24:44.116503Z`) passed verbatim as the Process
+  `timeRange.from`, the API returned **zero tiles / all-zero pixels** — every
+  live fetch would fail at `verify_sources` ("lacks source tiles"). Sentinel Hub
+  filters on whole-second acquisition timestamps (`date: "2026-08-10T11:24:44Z"`),
+  so a sub-second `from` bound falls after the scene and excludes it.
+  `fetch_scene_geotiff` now floors `from` / ceils `to` to whole seconds.
+  `verify_sources`' name and date checks are unchanged and still reject a wrong
+  product (neighbouring slices are ~25 s away). Regression test
+  `tests/test_observations.py::test_process_identity_real_cog_product` uses the
+  verbatim captured name/ID pair; `test_fetch_validates_pixels_and_interval` now
+  uses a sub-second interval and asserts the widening. Suite: 61 passed, 1
+  skipped.
+- **Full live end-to-end (real, not cached): SUCCESS.** `POST /api/live/fetch`
+  for the same bbox/date range returned `status: OK`, detection id 31
+  (`live_ff555771a909`), persisted to `data/pelagic.db` with `supplementary_json`.
+  `verify_sources` passed (`provenance.status = "verified"`, tile id matches),
+  tiled U-Net inference ran (CPU — see note), confidence `0.7475`,
+  200,682 predicted oil px after land masking (421,139 of 621,821 raw px removed
+  as land, 39,937 via OSM island refinement), pixel SHA-256
+  `41e98adc…43bd44b`. Acquisition timestamp and bbox in the response are the real
+  fetched-scene values (`2026-08-10T11:24:44.116503Z` … `T11:25:09.115202Z`),
+  not placeholders. GFW attribution ran (`ok`, 5 candidate vessels within 10 km)
+  — since re-verified in its own pass, see "GFW AIS attribution" below.
+- Note: the default checkpoint loads on a 4 GB CUDA device but `run_tiled_inference`
+  OOMs on a full 2048² live scene there; the end-to-end run above forced CPU
+  inference (`CUDA_VISIBLE_DEVICES=""`, ~124 s). This is an environment resource
+  limit, not a code defect, and is out of scope for this check.
+- Not verified here (separate prompt items): ERA5 wind, multi-temporal SAR pair,
+  Sentinel-2 optical.
+
+### GFW AIS attribution — real vessel-data verification (2026-09-06)
+
+Closes `prompt/pelagic-credential-verification.md` §5: confirm the nearby-vessel
+attribution returns real GFW AIS data, not the removed hardcoded `mock_vessels`
+and not a fixture. `GFW_TOKEN` present in `.env`; `validate_credentials.py` GFW
+check: **PASS** (real `GET /v3/datasets/public-global-presence:latest`, HTTP 200).
+
+**Verified against a real external service — `POST /api/live/fetch`, full endpoint.**
+Bbox `[1.10, 103.70, 1.30, 103.90]`, `date_from=2026-08-05`, `date_to=2026-08-15`,
+`radius_km=10.0`, run three times against a locally-served backend (CPU inference).
+All three returned `status: OK` on the real primary product
+`S1D_IW_GRDH_1SDV_20260810T112444_20260810T112509_004062_007671_C8DC_COG.SAFE`
+(real acquisition `2026-08-10T11:24:44.116503Z … T11:25:09.115202Z`), detection
+ids 32/33/34, and exercised the real GFW path:
+
+- The GFW step issues `POST https://gateway.api.globalfishingwatch.org/v3/4wings/report`
+  with params `spatial-resolution=HIGH`, `temporal-resolution=DAILY`,
+  `datasets[0]=public-global-presence:latest`, `date-range=2026-08-10,2026-08-11`,
+  `format=JSON`, and a JSON body `{geojson: <10 km buffer polygon around 1.20,
+  103.80>, group-by: MMSI}`.
+- **What came back for the scene's own acquisition day (2026-08-10): honest
+  `empty`.** HTTP 200 with `{"total":1,"entries":[{}]}` — the outer entry dict
+  carries no dataset key, GFW's real shape for a box/date with zero recorded
+  presence. `get_nearby_vessels` returned `status: "empty"`, zero vessels,
+  detail "No AIS vessel presence found within 10.0km on 2026-08-10";
+  `vessel_attribution_status` stored as `empty`. No vessel row was fabricated.
+  (Runs 32 and 34; run 33 hit a transient `ConnectionResetError` from the GFW
+  gateway and stored `error` — also honest, no fabricated data. The report
+  endpoint intermittently resets connections; a retry succeeds.)
+- 2026-08-10 appears to be a **gap in GFW's `public-global-presence` coverage**,
+  not a real absence of ships in the Singapore Strait: the identical query for
+  **2026-08-09** returns 5 real candidates (KST SUPER, PSA HULK CS04, KST KIJANG,
+  PILOT GP01, FORCE) and for **2026-08-11** returns 5 real candidates (SC6336G,
+  PILOT GP54, PILOT GP47, PILOT GP53, PILOT 12). The dataset's advertised
+  `endDate` is `2026-09-02`. The 2026-09-05 detection-31 run recorded `ok` for
+  this same date/box, so GFW's data for 2026-08-10 changed between then and now.
+
+**Real vessel data is genuine GFW AIS, not a fixture.** The same
+`get_nearby_vessels` code path, same bbox, for 2026-08-11 receives a real
+`public-global-presence:v4.0` payload of **3080 rows** — real MMSIs, ship names,
+flags (SGP/MYS/PHL/MLT/BLZ/MNG), vessel types and entry/exit timestamps
+(e.g. MMSI 249082000 = CMA CGM ALHAMBRA, MLT-flag container ship; MMSI 563250600
+= MAJESTIC HARMONY, SGP passenger ferry). The removed mock names
+(`Petro Express`, `Nakhon Fishery 21`) appear nowhere. Known behavioural note,
+not a fabrication and out of scope to change here: when the raw payload has
+thousands of rows, the top-5-by-distance candidates all land in the query's
+centre 0.01° grid cell and report an identical `distance_meters ≈ 0.3` with
+`position_resolution_m ≈ 1572` — consistent with the documented grid-cell-centre
+positioning (`src/analysis/gfw_client.py` docstring), though a spatially spread
+sample would be more informative; flagged for a possible later refinement.
+
+**Unit-tested locally (separate from the above):** `tests/test_gfw_client.py`
+(new, 16 tests) covers `gfw_client.py`'s parsing, distance sort, MMSI dedup,
+radius filter, `top_n` cap, the empty-entry and `null`-rows (Chonos-style) cases,
+and every honest-failure path (missing token → `skipped_no_credentials`;
+401/403 → `error`; 5xx → `error`; network exception → `error`; unparseable body
+→ `error`) — all asserting no vessel is ever fabricated. GFW responses there are
+synthetic fixtures built to the real JSON shape and labelled as such; they are
+not real API output. Previously `gfw_client.py` had no direct tests
+(`tests/conftest.py` stubs `get_nearby_vessels` for every API test).
 
 ### Sentinel-2 L2A optical supplement
 
@@ -239,6 +348,7 @@ The live credential verification checklist in
 ## Next action
 
 Restore the three required holdout TIFFs to complete the handoff's six real
-offline `/api/predict` inference checks. The live satellite, comparison, optical,
-and vessel pipelines are completely verified and working. ERA5 remains opt-in
-pending `CDSAPI_KEY` and CDS dataset license acceptance.
+offline `/api/predict` inference checks. The Process source-name check, GFW AIS
+attribution (§5), live Sentinel-1 detection, multi-temporal comparison pass,
+and Sentinel-2 optical RGB supplement are all verified against real services.
+ERA5 remains opt-in pending `CDSAPI_KEY` and CDS dataset license acceptance.
