@@ -1,8 +1,8 @@
 # Live supplementary evidence: verification guide
 
 Updated 2026-09-06: Live external verification has been executed and completed
-with real authenticated credentials for CDSE Sentinel-1, CDSE Sentinel-2, and
-Global Fishing Watch AIS. ERA5 was intentionally skipped per user request.
+with real authenticated credentials for CDSE Sentinel-1, CDSE Sentinel-2,
+Global Fishing Watch AIS, and ECMWF ERA5 10m wind reanalysis.
 Full end-to-end evidence is recorded in [status.md](status.md),
 [prompt/pelagic-credential-verification.md](../prompt/pelagic-credential-verification.md),
 and [last_live_fetch_result.json](last_live_fetch_result.json). Historical catalog evidence is in

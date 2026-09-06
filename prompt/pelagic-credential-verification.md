@@ -122,10 +122,17 @@ to paper over.
 * **Preconditions**:
   * `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET`: Verified authenticated via Copernicus OAuth2.
   * `GFW_TOKEN`: Verified authenticated via Global Fishing Watch v3 API.
-  * `CDSAPI_KEY`: Skipped by user instruction (`include_era5=false`), degrading honestly to `not_configured`.
+  * `CDSAPI_URL` and `CDSAPI_KEY`: Verified authenticated via ECMWF Climate Data Store API (`scripts/validate_credentials.py` returned PASS).
 * **Primary Sentinel-1 SAR End-to-End**:
   * Singapore Strait test area `bbox=[1.1, 103.7, 1.3, 103.9]`.
-  * Fetched acquisition `2026-08-10T11:24:44Z`, dual-polarization calibrated raster processed via U-Net (Detection #31, #32).
+  * Fetched acquisition `2026-08-10T11:24:44Z`, dual-polarization calibrated raster processed via U-Net (Detection #31, #32, and #36).
+* **ERA5 Wind Reanalysis (§2)**:
+  * Verified live via `POST /api/live/fetch` with `include_era5: true` (Detection #36).
+  * Retrieved hourly 10m wind vector for scene center (`1.20°N, 103.80°E`) at nearest whole UTC hour (`2026-08-10T11:00:00+00:00`).
+  * Grid point: `(1.15°N, 103.75°E)` on 0.25° grid.
+  * Vectors: `u10_ms = -1.9157 m/s`, `v10_ms = +4.3549 m/s`.
+  * Wind speed: `hypot(u10, v10) = 4.7576 m/s` (gentle breeze, within physical 1.5–6.0 m/s SAR oil-slick visibility window).
+  * Persisted honestly in SQLite `pelagic.db` with `status: "available"` and coarse-resolution disclosure.
 * **Multi-Temporal Revisit Check**:
   * Revisit candidate `2026-08-22T11:24:44Z` (`f2d1b36f..._COG.SAFE`) matched and downloaded.
   * Solved packaging name difference in `verify_sources()` by comparing the core datatake identifier.

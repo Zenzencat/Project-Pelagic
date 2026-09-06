@@ -144,6 +144,7 @@ In addition to evaluating local holdout scenes, Project Pelagic features a live 
 * **Real AIS Vessel Attribution**: Matches real-time commercial vessel coordinates around the detection timestamp via Global Fishing Watch (GFW) API v3.
 * **Multi-Temporal SAR Revisit (`include_temporal: true`)**: Retrieves an alternate-date Sentinel-1 pass (e.g. 12-day orbit repeat) over the exact same bounding box to provide persistence evidence (oil slick vs transient lookalike) without automated classification bias.
 * **Sentinel-2 Optical RGB (`include_optical: true`)**: Fetches Sentinel-2 L2A true-color RGB imagery with cloud percentage filtering to provide visual context over the maritime region.
+* **ERA5 10m Wind Reanalysis (`include_era5: true`)**: Retrieves hourly 10m wind vector components ($u_{10}$, $v_{10}$) from ECMWF Copernicus Climate Data Store (CDS) at the nearest UTC hour and computes wind speed to evaluate SAR oil slick visibility conditions (optimal dampening contrast at 1.5–6.0 m/s).
 * **Disk-Backed Preview Storage**: Generated SAR overlays and optical true-color PNGs are stored at `data/raw/live/previews/` and served via `GET /api/previews/{filename}` (capped at 500 files via oldest-first LRU eviction).
 * **Synthetic Calibration Audit**: See [docs/synthetic_calibration_audit.md](docs/synthetic_calibration_audit.md) for the mathematical audit comparing Level-1 DN squaring vs linear power emission.
 

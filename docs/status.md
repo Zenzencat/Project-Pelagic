@@ -10,18 +10,19 @@ closed out — see "GFW AIS attribution" under Live credential verification.
 
 ## Current environment and scope
 
-- User-supplied CDSE client credentials and GFW token are configured in the
-  ignored local `.env` and authenticated against live APIs (CDSE Process API
-  and GFW v3 4Wings API). `CDSAPI_KEY` for ERA5 wind was skipped by user request;
-  ERA5 degrades cleanly and honestly to `not_configured`.
+- User-supplied CDSE client credentials, GFW token, and CDS API key are configured
+  in the ignored local `.env` and authenticated against live APIs (CDSE Process API,
+  GFW v3 4Wings API, and ECMWF Climate Data Store API).
 - Environment is Python 3.11.9 (`.venv`) on Windows. All dependencies from `requirements.txt`
-  are satisfied. `pytest.ini` configures `pythonpath = .` for direct invocation.
+  plus optional NetCDF stack (`cdsapi`, `xarray`, `netCDF4`) are satisfied.
+  `pytest.ini` configures `pythonpath = .` for direct invocation.
 - Real v2/v1 checkpoints and synthetic TIFFs are present. The requested
   `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs remain absent
   for offline holdout inference, but live CDSE fetching is completely functional.
 - This session verified live CDSE Sentinel-1 SAR acquisition, tiled U-Net inference,
-  OSM land masking, GFW AIS vessel matching, multi-temporal revisit SAR, and
-  Sentinel-2 true-color optical RGB. Previews are stored on disk under `data/raw/live/previews/`.
+  OSM land masking, GFW AIS vessel matching, multi-temporal revisit SAR,
+  Sentinel-2 true-color optical RGB, and ERA5 10m reanalysis wind evidence. Previews
+  are stored on disk under `data/raw/live/previews/`.
 
 ## Preview storage
 
@@ -57,14 +58,13 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
 ## Current verification
 
 - Full test suite: `pytest tests -k "not symlink" -v`:
-  **60 passed, 1 skipped** (the optional NetCDF test requiring CDS credentials),
-  0 failures.
+  **78 passed, 0 skipped, 0 failures** (including `tests/test_era5.py::test_netcdf_selection_and_request` with installed `xarray` and `netCDF4`).
 - Unit tests cover decoupled database initialization: `tests/test_database_seeding.py`
   proves that `init_db(seed_demo=False)` leaves fresh databases empty, while
   `scripts/seed_demo_data.py` explicitly populates demo scenes when desired.
 - GitHub Actions CI workflow created at `.github/workflows/ci.yml` running both
   backend test suite (Python 3.11) and frontend lint/build (Node 20).
-- Live End-to-End Verification (Detection #31 and #32 in `data/pelagic.db`):
+- Live End-to-End Verification (Detection #31, #32, and #36 in `data/pelagic.db`):
   - Primary Sentinel-1 SAR acquisition (`2026-08-10T11:24:44Z`, Singapore Strait)
     analyzed with 74.75% confidence oil slick detected.
   - GFW AIS attribution matched 5 real commercial vessels (`status: ok`).
@@ -74,6 +74,10 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
     via expanded $\pm30$ min sensing time window and rendered with `status: available`.
   - Previews generated on disk: `32_original_sar.png`, `32_original_overlay.png`,
     `32_temporal_0_sar.png`, `32_temporal_0_overlay.png`, `32_optical_rgb.png`.
+  - **ERA5 10m Wind Evidence (Detection #36)**: `POST /api/live/fetch` executed with `include_era5: true`.
+    Retrieved real ERA5 10m wind vector from ECMWF CDS API (`u10 = -1.9157 m/s`, `v10 = +4.3549 m/s`,
+    `speed = 4.7576 m/s`) for scene center (`1.20°N, 103.80°E`) at nearest UTC hour (`11:00:00 UTC`,
+    `grid_lat = 1.15, grid_lon = 103.75`), stored with `status: available`.
 - Standalone zero-config map dashboard created at `docs/live_dashboard.html` rendering
   all layers using free Esri Satellite and OSM tiles without API keys.
 
@@ -94,9 +98,18 @@ SAR pixel or slick polygon. Retrieval runs in a separate process with a
 `not_configured`; failures report `unavailable`, without a numeric wind value.
 No wind-derived oil verdict is produced.
 
-Local NetCDF checks write real files containing synthetic test components;
-CDS retrieval is mocked. Real ERA5 retrieval remains blocked on a CDS key and
-license acceptance.
+**Live ECMWF CDS API verification (2026-09-06):**
+- CDS credentials (`CDSAPI_URL` and `CDSAPI_KEY`) configured in `.env` and `~/.cdsapirc`.
+- Minimal request check via `scripts/validate_credentials.py` returned **PASS** (retrieved real ERA5 netCDF file).
+- Full live pipeline verification via `POST /api/live/fetch` with `include_era5=true` on Singapore Strait scene (`live_8e8f6c79d1ce`, Detection #36):
+  - Acquisition timestamp: `2026-08-10T11:24:44.116503Z` at center `(1.20°N, 103.80°E)`.
+  - Returned valid time: `2026-08-10T11:00:00+00:00` (nearest whole UTC hour, correct).
+  - Returned grid point: `(1.15°N, 103.75°E)` (nearest 0.25° grid node).
+  - Wind components: `u10_ms = -1.9157 m/s`, `v10_ms = +4.3549 m/s`.
+  - Wind speed: `hypot(u10, v10) = 4.7576 m/s` (~9.2 knots, gentle breeze / Beaufort 3).
+  - Physical check: 4.76 m/s falls squarely within the physical SAR oil-slick visibility window (1.5–6.0 m/s), where capillary/short gravity waves are dampened by oil films producing high radar contrast.
+  - Stored in SQLite `pelagic.db` under `supplementary_json` with honest `resolution_note` and `status: available`.
+- Unit tests (`tests/test_era5.py`): 8 passed, covering magnitude, missing config, invalid timestamp, worker timeout, process isolation, and real netCDF selection/extraction via `xarray`/`netCDF4`.
 
 ### Different-date Sentinel-1 comparison
 
@@ -330,8 +343,8 @@ confusion_matrix_breakdown, region_coverage and phase4_confirm_* in docs.
 ## Live external verification status
 
 The live credential verification checklist in
-`prompt/pelagic-credential-verification.md` is **verified and completed**:
-- **Real live Sentinel-1 detection**: Verified (Detection #31 and #32). Downloaded
+`prompt/pelagic-credential-verification.md` is **100% verified and completed across all services**:
+- **Real live Sentinel-1 detection**: Verified (Detection #31, #32, and #36). Downloaded
   calibrated SAR raster via CDSE Process API, ran tiled U-Net inference,
   executed OSM land masking, and persisted previews to disk.
 - **GFW AIS vessel attribution**: Verified (`ok`, 5 real nearby vessels matched).
@@ -342,13 +355,16 @@ The live credential verification checklist in
 - **Sentinel-2 optical RGB supplement**: Verified (`available`). Handled granule
   sensing time offsets in Process `timeRange` and confirmed true-color RGB rendering
   for low-cloud scene (`S2C...20260822...SAFE`, 13.1% cloud cover).
-- **ERA5 wind**: Skipped by design (`not_configured`). Remains available when
-  `CDSAPI_KEY` is provided and dataset license is accepted.
+- **ERA5 wind**: Verified (`available`, Detection #36). Validated against live ECMWF CDS API.
+  Submits nearest-hour query (11:00:00 UTC) on 0.25° grid, extracts u10/v10 vectors
+  (-1.92 m/s, +4.35 m/s), calculates wind speed (4.76 m/s, consistent with 1.5–6.0 m/s
+  SAR slick dampening physics), and persists evidence honestly.
 
 ## Next action
 
 Restore the three required holdout TIFFs to complete the handoff's six real
-offline `/api/predict` inference checks. The Process source-name check, GFW AIS
-attribution (§5), live Sentinel-1 detection, multi-temporal comparison pass,
-and Sentinel-2 optical RGB supplement are all verified against real services.
-ERA5 remains opt-in pending `CDSAPI_KEY` and CDS dataset license acceptance.
+offline `/api/predict` inference checks. All live production paths (CDSE Process
+Sentinel-1 SAR, GFW AIS attribution, multi-temporal SAR revisit comparison,
+Sentinel-2 optical RGB supplement, and ECMWF ERA5 10m wind reanalysis) are
+fully authenticated, verified against real external services, and documented with
+clean test coverage (78 passed tests).

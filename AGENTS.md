@@ -70,9 +70,9 @@ flag the discrepancy rather than silently repeating either figure.
   Recent Resolution #9 for why) and attributes it to real nearby AIS vessels
   via the Global Fishing Watch API (`src/analysis/gfw_client.py`). This
   replaced the old hardcoded `mock_vessels` in `main.py`. `CDSE_CLIENT_ID` /
-  `CDSE_CLIENT_SECRET` and `GFW_TOKEN` were verified authenticated and functional
-  in 2026-09-06 live end-to-end tests (Detections #31 and #32). `CDSAPI_KEY` for
-  ERA5 was skipped by user request, maintaining honest `not_configured` degradation.
+  `CDSE_CLIENT_SECRET`, `GFW_TOKEN`, and `CDSAPI_KEY` were all verified authenticated
+  and functional in 2026-09-06 live end-to-end tests (Detections #31, #32, and #36).
+  ERA5 10m wind vector retrieval returned 4.76 m/s at 11:00 UTC for Detection #36.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
