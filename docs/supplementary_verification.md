@@ -1,12 +1,12 @@
 # Live supplementary evidence: verification guide
 
-The earlier 2026-09-05 continuation verified local NetCDF, HTTP and browser paths
-and retrieved real public catalog metadata. CDSE and GFW credentials are now
-configured locally; authenticated satellite pixels remain unverified, and ERA5
-still needs a CDS API key. Read [status.md](status.md) for current
-blockers and measured results; the historical catalog evidence is in
+Updated 2026-09-06: Live external verification has been executed and completed
+with real authenticated credentials for CDSE Sentinel-1, CDSE Sentinel-2, and
+Global Fishing Watch AIS. ERA5 was intentionally skipped per user request.
+Full end-to-end evidence is recorded in [status.md](status.md),
+[prompt/pelagic-credential-verification.md](../prompt/pelagic-credential-verification.md),
+and [last_live_fetch_result.json](last_live_fetch_result.json). Historical catalog evidence is in
 [live_catalog_verification.json](live_catalog_verification.json).
-The original investigation details remain in [status_history.md](status_history.md).
 
 From the repository root, run offline checks:
 

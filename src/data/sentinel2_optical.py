@@ -47,11 +47,12 @@ def render_optical(token, bbox, product, max_cloud_pct):
     ratio = (max_lon - min_lon) / (max_lat - min_lat)
     width, height = (640, max(1, round(640 / ratio))) if ratio >= 1 else (max(1, round(640 * ratio)), 640)
     start, end = acquisition_time(product['start']), acquisition_time(product['end'])
+    time_from = (start - timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    time_to = (end + timedelta(minutes=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
     body = {
         'input': {'bounds': {'bbox': [min_lon, min_lat, max_lon, max_lat]}, 'data': [{
             'type': 'sentinel-2-l2a', 'dataFilter': {
-                'timeRange': {'from': (start - timedelta(seconds=1)).isoformat(),
-                              'to': (end + timedelta(seconds=1)).isoformat()},
+                'timeRange': {'from': time_from, 'to': time_to},
                 'maxCloudCoverage': max_cloud_pct}}]},
         'output': {'width': width, 'height': height, 'responses': [
             {'identifier': 'default', 'format': {'type': 'image/png'}},

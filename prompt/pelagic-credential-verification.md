@@ -114,3 +114,28 @@ from `prompt/pelagic-loop.md` §7. Do not guess-fix by adding retries or
 fallback values. A real external failure (expired license, rate limit,
 network issue) is a valid, honestly-documented outcome — it is not something
 to paper over.
+
+---
+
+## 8. Verification Results (Completed 2026-09-06)
+
+* **Preconditions**:
+  * `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET`: Verified authenticated via Copernicus OAuth2.
+  * `GFW_TOKEN`: Verified authenticated via Global Fishing Watch v3 API.
+  * `CDSAPI_KEY`: Skipped by user instruction (`include_era5=false`), degrading honestly to `not_configured`.
+* **Primary Sentinel-1 SAR End-to-End**:
+  * Singapore Strait test area `bbox=[1.1, 103.7, 1.3, 103.9]`.
+  * Fetched acquisition `2026-08-10T11:24:44Z`, dual-polarization calibrated raster processed via U-Net (Detection #31, #32).
+* **Multi-Temporal Revisit Check**:
+  * Revisit candidate `2026-08-22T11:24:44Z` (`f2d1b36f..._COG.SAFE`) matched and downloaded.
+  * Solved packaging name difference in `verify_sources()` by comparing the core datatake identifier.
+  * Returned `status: "available"` with comparison SAR and overlay previews.
+* **Sentinel-2 Optical RGB**:
+  * Candidate `2026-08-22` (13.1% cloud cover) matched.
+  * Solved granule sensing time offset in Process API by expanding query window $\pm30$ minutes.
+  * Returned `status: "available"` with true-color RGB preview.
+* **GFW AIS Vessel Attribution**:
+  * Returned `status: "ok"` with 5 real nearby commercial vessels (`JMS BENAR`, `VB MENANG`, `OKEE JOHN T`, `PILOT GP57`, `NOBLE VEGA`).
+* **Artifacts & Previews**:
+  * Full JSON payload persisted in `docs/last_live_fetch_result.json`.
+  * Previews saved to `data/raw/live/previews/` and rendered in `docs/live_dashboard.html`.

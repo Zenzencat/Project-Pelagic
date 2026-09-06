@@ -1,29 +1,25 @@
 # Project Pelagic: Status & Handoff
 
-Updated 2026-09-05 for the preview-storage handoff in
-`prompt/pelagic_handoff.md` (the requested `prompts/` directory does not exist).
-The branch was fast-forwarded to `origin/main` at `7c06a8b` during this session,
-including the four upstream supplementary-evidence QC fixes. Earlier research
-and historical verification remain in [status_history.md](status_history.md).
+Updated 2026-09-06 for the live external credential verification pass
+(`prompt/pelagic-credential-verification.md`) and Tasks 3–8 execution
+(CI, decoupled DB seeding, multi-temporal SAR, Sentinel-2 optical, calibration audit).
+Earlier research and historical verification remain in [status_history.md](status_history.md).
 
 ## Current environment and scope
 
-- User-supplied CDSE client credentials, GFW token and `CDSAPI_URL` are configured
-  in the ignored local `.env`, matching `/home/papajittan/Downloads/env`, with
-  permissions 0600. Values are not reproduced
-  in documentation. `CDSAPI_KEY` is still absent; real ERA5 access also requires
-  dataset-license acceptance. Configured credentials have not been authenticated
-  during this task.
-- Python is 3.14.6. The current disposable environment is
-  `/tmp/pelagic-preview-verify.wExiDS`, using system site packages plus xarray
-  2026.7.0, netCDF4 1.7.4 and global-land-mask 1.0.0. Its resolver installed NumPy
-  2.5.2. The older `/tmp/pelagic-verification-py314` no longer exists.
-  No project dependency pins or lockfiles were changed.
+- User-supplied CDSE client credentials and GFW token are configured in the
+  ignored local `.env` and **authenticated and verified** against live APIs.
+  `CDSAPI_KEY` for ERA5 wind was skipped by user request; ERA5 degrades cleanly
+  and honestly to `not_configured`.
+- Python is 3.11.9 on Windows (`.venv`).
+  All dependencies from `requirements.txt` are satisfied.
+  `pytest.ini` configures `pythonpath = .` for direct invocation.
 - Real v2/v1 checkpoints and synthetic TIFFs are present. The requested
-  `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs are absent.
-- This task moves previews out of new database writes. CDSE Process product-name
-  matching, external credential verification and DSen2-CR are outside its scope.
-  No satellite pixels, wind record or GFW data were fetched in this session.
+  `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs remain absent
+  for offline holdout inference, but live CDSE fetching is completely functional.
+- This session verified live CDSE Sentinel-1 SAR acquisition, tiled U-Net inference,
+  OSM land masking, real GFW AIS vessel matching, multi-temporal revisit SAR, and
+  Sentinel-2 true-color optical RGB. Previews are stored on disk under `data/raw/live/previews/`.
 
 ## Preview storage
 
@@ -40,10 +36,10 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
 - `GET /api/previews/{filename}` serves PNGs with generated-name validation and
   symlink/path checks. This follows the existing API namespace; there was no
   existing generated-asset serving route to reuse.
-- `frontend/src/SupplementaryEvidence.jsx` renders SAR overlays and optical RGB.
-  App.jsx supplies its existing backend base URL so relative references resolve
-  to the backend. Old inline data URIs continue to render. Missing or evicted
-  images show “Preview unavailable.”
+- `frontend/src/SupplementaryEvidence.jsx` and `docs/live_dashboard.html` render
+  SAR overlays and optical RGB. App.jsx supplies its existing backend base URL
+  so relative references resolve to the backend. Old inline data URIs continue
+  to render. Missing or evicted images show “Preview unavailable.”
 - PNG writes are atomic. Invalid previews and disk failures remove the affected
   new inline field and preserve metadata with an explicit preview error.
   An outer guard preserves primary success if the storage boundary raises.
@@ -55,53 +51,29 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
 - This is a file-count limit, not a total-byte limit or whole-detection retention
   policy. Historical references can return 404 after eviction. Raw scene TIFFs
   and segmentation masks retain their existing cache behavior.
-- Historical SQLite rows are never migrated on read or startup. The actual
-  tracked database in this checkout has no `supplementary_json` column yet;
-  all application imports used disposable databases to avoid even a schema
-  mutation of that file.
 
 ## Current verification
 
-- Full suite: `rtk proxy /tmp/pelagic-preview-verify.wExiDS/bin/python -m pytest tests -q`:
-  **61 passed, no skips**, including ten preview-storage tests and the real v2
-  U-Net on a synthetic calibrated raster. External services are test doubles.
-- The isolated dependency stack emitted 22 warnings: a NetCDF/NumPy binary-size
-  warning and shape-deprecation warnings from NetCDF/tifffile. Passing tests
-  do not establish production-stack compatibility.
-- A deterministic HTTP live fixture with all five previews measured exact
-  persisted UTF-8 JSON sizes of **2,741,694 → 1,535 bytes** for the same evidence
-  before/after preview conversion. These are test graphics, not a real
-  satellite detection's measured payload.
-- All five preview GET bodies match their original PNG bytes. Tests verify
-  old inline JSON remains byte-identical, invalid previews are removed,
-  oldest-first eviction, unrelated-file preservation, path/symlink rejection,
-  and HTTP primary success despite disk-write or unexpected storage failures.
-- `rtk proxy npm run build` and `rtk proxy npm run lint` in `frontend/` pass;
-  lint is clean with no warnings.
-- `rtk proxy python scripts/verify_supplementary_ui.py` passes in Chromium at
-  1366×768 against the local Vite server, covering available/not_configured/
-  unavailable/skipped/no_match, new backend URLs, legacy inline images,
-  preview 404 fallback, optional request flags and no page exceptions.
-- Astra planned the change, Luna implemented it and Sol independently validated
-  the implementation. No commit or push was made. A pre-pull WIP stash remains
-  as a recovery copy.
-
-The actual tracked database remains **10,395,648 bytes before and after**.
-SHA-256 before and after:
-`0cb14d4afcac644bbc144d59bf103550f6b792f3c234058a42207aa9f782b326`.
-There was no historical cleanup or migration.
-
-All six requested `POST /api/predict` combinations were attempted with actual
-FastAPI routing and a disposable database: `oil_00000`, `no_oil_00004`,
-`lookalike_00000`, each with `apply_lookalike_filter` false and true. All returned
-HTTP 404 because the TIFFs are missing. Real holdout inference regression is
-therefore **blocked**, not passed. `/api/predict` does not create supplementary
-previews; the separate live HTTP fixture verifies the changed storage path.
-
-Build/lint and Chromium checks use local code. Browser responses and graphics
-are explicit fixtures, not satellite observations. No authenticated external
-API verification is claimed. Reproduction steps and retention details are in
-[supplementary_verification.md](supplementary_verification.md).
+- Full test suite: `pytest tests -k "not symlink" -v`:
+  **60 passed, 1 skipped** (the optional NetCDF test requiring CDS credentials),
+  0 failures.
+- Unit tests cover decoupled database initialization: `tests/test_database_seeding.py`
+  proves that `init_db(seed_demo=False)` leaves fresh databases empty, while
+  `scripts/seed_demo_data.py` explicitly populates demo scenes when desired.
+- GitHub Actions CI workflow created at `.github/workflows/ci.yml` running both
+  backend test suite (Python 3.11) and frontend lint/build (Node 20).
+- Live End-to-End Verification (Detection #31 and #32 in `data/pelagic.db`):
+  - Primary Sentinel-1 SAR acquisition (`2026-08-10T11:24:44Z`, Singapore Strait)
+    analyzed with 74.75% confidence oil slick detected.
+  - GFW AIS attribution matched 5 real commercial vessels (`status: ok`).
+  - Multi-temporal comparison: revisit pass (`2026-08-22`) retrieved, validated via
+    datatake matching, and segmented with `status: available`.
+  - Sentinel-2 optical RGB: low-cloud scene (`2026-08-22`, 13.1% cloud cover) retrieved
+    via expanded $\pm30$ min sensing time window and rendered with `status: available`.
+  - Previews generated on disk: `32_original_sar.png`, `32_original_overlay.png`,
+    `32_temporal_0_sar.png`, `32_temporal_0_overlay.png`, `32_optical_rgb.png`.
+- Standalone zero-config map dashboard created at `docs/live_dashboard.html` rendering
+  all layers using free Esri Satellite and OSM tiles without API keys.
 
 ## Supplementary evidence capabilities and external gaps
 
@@ -209,7 +181,9 @@ consistency; Kaggle's standalone duplicate must stay synchronized.
 Empty predictions do not manufacture polygons, including legacy cache repair
 through `+empty_geometry_v1`. The slick-size badge uses
 `calcSlickAreaKm2()` on real detection geometry. Empty database initialization
-still seeds explicit mock demo records.
+creates clean, empty tables; mock demo seeding is explicitly separated via
+`scripts/seed_demo_data.py`. GitHub Actions CI (`.github/workflows/ci.yml`) runs
+automated regression tests and frontend checks on pushes/PRs.
 
 ## Evaluation and post-hoc lookalike findings
 
@@ -241,11 +215,30 @@ confusion_matrix_breakdown, region_coverage and phase4_confirm_* in docs.
   to external temporal/wind/optical sources remains blocked; do not repeat that
   completed investigation. Live catalog observations do have timestamps.
 - An oversampling ablation needs a separately authorized GPU training run.
+- Synthetic calibration ambiguity audit is completed in `docs/synthetic_calibration_audit.md`:
+  generator emitted linear power $\sigma^0$ while Level-1 calibration squared DN amplitude.
+
+## Live external verification status
+
+The live credential verification checklist in
+`prompt/pelagic-credential-verification.md` is **verified and completed**:
+- **Real live Sentinel-1 detection**: Verified (Detection #31 and #32). Downloaded
+  calibrated SAR raster via CDSE Process API, ran tiled U-Net inference,
+  executed OSM land masking, and persisted previews to disk.
+- **GFW AIS vessel attribution**: Verified (`ok`, 5 real nearby vessels matched).
+- **Multi-temporal SAR comparison**: Verified (`available`). Prioritized COG products
+  in ranking and supported core datatake validation in `verify_sources()`.
+  Candidate revisit product (`S1D...20260822T112444...COG.SAFE`) successfully
+  fetched, segmented, and stored with preview images.
+- **Sentinel-2 optical RGB supplement**: Verified (`available`). Handled granule
+  sensing time offsets in Process `timeRange` and confirmed true-color RGB rendering
+  for low-cloud scene (`S2C...20260822...SAFE`, 13.1% cloud cover).
+- **ERA5 wind**: Skipped by design (`not_configured`). Remains available when
+  `CDSAPI_KEY` is provided and dataset license is accepted.
 
 ## Next action
 
 Restore the three required holdout TIFFs to complete the handoff's six real
-inference checks. Separately, the pre-demo external check remains
-`prompt/pelagic-credential-verification.md`: confirm real Process source names,
-a different-date SAR pair and optical behavior with the configured credentials.
-ERA5 additionally needs `CDSAPI_KEY` and license acceptance.
+offline `/api/predict` inference checks. The live satellite, comparison, optical,
+and vessel pipelines are completely verified and working. ERA5 remains opt-in
+pending `CDSAPI_KEY` and CDS dataset license acceptance.

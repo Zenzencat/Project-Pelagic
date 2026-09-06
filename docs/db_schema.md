@@ -10,6 +10,8 @@ This document defines the relational database schema for storing detection metad
 For the proof-of-concept (PoC) phase, the system uses **SQLite** as its database engine.
 * **Why SQLite**: It is a self-contained, serverless, file-based database that requires zero configuration. This ensures that the code can run immediately on any evaluator's or project team member's computer without installing a local PostgreSQL or PostGIS server.
 * **Geospatial Storage**: Since SQLite does not have spatial querying out of the box (without complex SpatiaLite extensions), spatial geometries (like the boundary of the detected slick) are stored as **GeoJSON strings** in a `TEXT` field. This string can be read directly by the FastAPI backend and passed to Leaflet.js, which natively renders GeoJSON.
+* **Initialization & Seeding Strategy**: `init_db(seed_demo=False)` automatically creates tables and runs schema migrations on app launch without injecting mock data. This ensures fresh databases remain clean for live detections. Explicit seeding for evaluation and demo purposes is handled separately via `python scripts/seed_demo_data.py`.
+* **Preview Image Storage**: High-resolution SAR overlays, revisit comparisons, and optical RGB previews are saved as PNG files under `data/raw/live/previews/` rather than multi-megabyte inline base64 strings in `supplementary_json`. They are served via `GET /api/previews/{filename}` with an oldest-first LRU cap (`MAX_PREVIEW_FILES = 500`).
 
 ---
 
