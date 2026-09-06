@@ -21,8 +21,8 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db(seed_demo=False):
-    """Initializes tables and migrations. Leaves database empty unless seed_demo=True."""
+def init_db(seed_demo=True):
+    """Initializes tables and migrations. Auto-seeds demo data if empty unless seed_demo=False."""
     conn = get_db_connection()
     cursor = conn.cursor()
     

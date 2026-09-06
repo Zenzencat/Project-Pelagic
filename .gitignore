@@ -40,3 +40,6 @@ kaggle_eval_output/
 # rerun 2048x2048 dumps; the JSON feature vectors + overview PNG beside them
 # ARE tracked). Everything else under output/ is fine to add.
 output/phase3_6_diagnostic/*.npz
+
+# Generated large test JSON dumps
+docs/last_live_fetch_result.json

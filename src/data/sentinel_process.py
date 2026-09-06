@@ -44,14 +44,8 @@ def verify_sources(metadata, product, sensor):
         if not isinstance(name, str):
             raise ValueError('Process response contains an unidentified product')
         tile_name = name.removesuffix('.SAFE')
-        if tile_name != expected_name:
-            if sensor == 'S1':
-                exp_core = '_'.join(expected_name.split('_')[:8])
-                tile_core = '_'.join(tile_name.split('_')[:8])
-                if not (exp_core and exp_core == tile_core):
-                    raise ValueError('Process response contains a different or unidentified product')
-            else:
-                raise ValueError('Process response contains a different or unidentified product')
+        if tile_name != expected_name and tile_name.removesuffix('_COG') != expected_name.removesuffix('_COG'):
+            raise ValueError('Process response contains a different or unidentified product')
         dt = acquisition_time(tile['date'])
         # S1 slices are within seconds; S2 granule sensing times can be ~20m into the pass on the same date
         if sensor == 'S1':
