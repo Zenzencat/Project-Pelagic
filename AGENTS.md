@@ -105,7 +105,7 @@ flag the discrepancy rather than silently repeating either figure.
     pass (13.1% cloud cover).
   - Shared plumbing lives in `src/data/observation_catalog.py` (public OData
     search + footprint validation) and `src/data/sentinel_process.py` (Process
-    transport + returned-source verification). Core datatake matching (`verify_sources()`)
+    transport + returned-source verification). Packaging normalization (`verify_sources()`)
     and granule sensing time windowing ($\pm30$ min) are verified.
   - Results persist in `detections.supplementary_json` and come back on
     `GET /api/detections/{id}` as `supplementary`; legacy rows are `NULL` and

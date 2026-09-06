@@ -135,7 +135,7 @@ to paper over.
   * Persisted honestly in SQLite `pelagic.db` with `status: "available"` and coarse-resolution disclosure.
 * **Multi-Temporal Revisit Check**:
   * Revisit candidate `2026-08-22T11:24:44Z` (`f2d1b36f..._COG.SAFE`) matched and downloaded.
-  * Solved packaging name difference in `verify_sources()` by comparing the core datatake identifier.
+  * Solved packaging name difference in `verify_sources()` by normalizing the `_COG` suffix, comparing full product identity, orbit, and hash.
   * Returned `status: "available"` with comparison SAR and overlay previews.
 * **Sentinel-2 Optical RGB**:
   * Candidate `2026-08-22` (13.1% cloud cover) matched.

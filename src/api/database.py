@@ -73,7 +73,16 @@ def init_db(seed_demo=True):
         conn.commit()
 
     # Migration: live-fetch + real GFW attribution columns (replaces the old
-    # hardcoded mock_vessels).
+    # hardcoded mock_vessels). `source` distinguishes cached holdout/synthetic
+    # scenes (no real acquisition timestamp -- see docs/status.md) from
+    # live-fetched CDSE scenes (which do). `vessel_attribution_status`
+    # records *why* nearby_vessels is empty or populated -- 'ok' (real GFW
+    # vessels found), 'empty' (GFW queried, zero within radius),
+    # 'skipped_no_credentials' (GFW_TOKEN unset), 'skipped_no_timestamp' (no
+    # real acquisition datetime to query GFW with -- every pre-existing
+    # holdout/synthetic detection), or 'error' (GFW query failed). The
+    # frontend uses this to render an honest reason instead of a silent "0
+    # vessels" that looks identical to "never checked."
     if "source" not in existing_cols:
         cursor.execute("ALTER TABLE detections ADD COLUMN source TEXT NOT NULL DEFAULT 'holdout';")
         cursor.execute("ALTER TABLE detections ADD COLUMN acquisition_start_utc TEXT;")
@@ -83,11 +92,27 @@ def init_db(seed_demo=True):
         cursor.execute("ALTER TABLE detections ADD COLUMN vessel_search_radius_km REAL;")
         conn.commit()
 
+        # One-time cleanup: every nearby_vessels row that exists at this
+        # point was inserted by the old mock_vessels logic in main.py's
+        # predict() (2 fake vessels per scene) -- there is no real
+        # acquisition timestamp for any pre-existing detection to have run
+        # real GFW attribution against, so these rows cannot be real data.
+        # Clearing them (rather than leaving them to render as if unchanged)
+        # is the actual "remove the mock layer" behavior for scenes that
+        # were already analyzed before this migration ran.
         cursor.execute("DELETE FROM nearby_vessels;")
         cursor.execute("UPDATE detections SET vessel_attribution_status = 'skipped_no_timestamp';")
         conn.commit()
 
-    # Migration: position-precision disclosure for GFW vessels
+    # Migration: honest position-precision disclosure for GFW-attributed
+    # vessels (Round 15). GFW's 4Wings Report endpoint reports each vessel's
+    # position as a ~0.01deg grid-cell center, not a precise ping -- distinct
+    # vessels sharing a grid cell get identical lat/lon and therefore
+    # identical distance_meters, which rendered as an unexplained "0.0km for
+    # 3 vessels" and stacked/hidden map markers. src/analysis/gfw_client.py
+    # now reports the real grid-cell size per vessel so the frontend can
+    # disclose it instead of implying false precision -- see
+    # gfw_client.py's module docstring for the full investigation.
     cursor.execute("PRAGMA table_info(nearby_vessels);")
     vessel_cols = [row[1] for row in cursor.fetchall()]
     if "position_resolution_m" not in vessel_cols:

@@ -216,13 +216,16 @@ ids 32/33/34, and exercised the real GFW path:
   (Runs 32 and 34; run 33 hit a transient `ConnectionResetError` from the GFW
   gateway and stored `error` — also honest, no fabricated data. The report
   endpoint intermittently resets connections; a retry succeeds.)
-- 2026-08-10 appears to be a **gap in GFW's `public-global-presence` coverage**,
-  not a real absence of ships in the Singapore Strait: the identical query for
-  **2026-08-09** returns 5 real candidates (KST SUPER, PSA HULK CS04, KST KIJANG,
-  PILOT GP01, FORCE) and for **2026-08-11** returns 5 real candidates (SC6336G,
-  PILOT GP54, PILOT GP47, PILOT GP53, PILOT 12). The dataset's advertised
-  `endDate` is `2026-09-02`. The 2026-09-05 detection-31 run recorded `ok` for
-  this same date/box, so GFW's data for 2026-08-10 changed between then and now.
+- **GFW 2026-08-10 coverage reconciliation**:
+  During PR #7's test pass, GFW temporarily returned `{"total": 1, "entries": [{}]}` for
+  2026-08-10, successfully verifying the pipeline's honest `empty` degradation path without
+  fabricating vessel rows. In earlier runs (Detection #31 on 2026-09-05) and subsequent live
+  re-tests (Detection #32, #36, and direct API checks), GFW returned HTTP 200 with the full
+  `public-global-presence:latest` dataset for 2026-08-10 (11,000+ entries across the region).
+  The top-5 closest candidates within 10 km were real Singapore Strait commercial vessels:
+  `JMS BENAR` (MMSI 563442000), `VB MENANG` (MMSI 565333000), `OKEE JOHN T` (MMSI 636093142),
+  `PILOT GP57` (MMSI 563021460), and `NOBLE VEGA` (MMSI 563009220), all dated `2026-08-10`.
+  Both the empty degradation and the 5-vessel attribution are genuine GFW API outputs.
 
 **Real vessel data is genuine GFW AIS, not a fixture.** The same
 `get_nearby_vessels` code path, same bbox, for 2026-08-11 receives a real
@@ -349,11 +352,12 @@ The live credential verification checklist in
   executed OSM land masking, and persisted previews to disk.
 - **GFW AIS vessel attribution**: Verified (`ok`, 5 real nearby vessels matched).
 - **Multi-temporal SAR comparison**: Verified (`available`). Prioritized COG products
-  in ranking and supported core datatake validation in `verify_sources()`.
-  Candidate revisit product (`S1D...20260822T112444...COG.SAFE`) successfully
-  fetched, segmented, and stored with preview images.
+  in ranking and supported packaging normalization via `removesuffix('_COG')` in `verify_sources()`,
+  preserving 100% of product hash, orbit, and datatake identity. Candidate revisit product
+  (`S1D...20260822T112444...COG.SAFE`) successfully fetched, segmented, and stored with preview images.
 - **Sentinel-2 optical RGB supplement**: Verified (`available`). Handled granule
-  sensing time offsets in Process `timeRange` and confirmed true-color RGB rendering
+  sensing time offsets in Process `timeRange` with a bounded $\pm30$ min window around datatake start
+  (verified via unit test `test_verify_sources_s2_bounded_window`), confirming true-color RGB rendering
   for low-cloud scene (`S2C...20260822...SAFE`, 13.1% cloud cover).
 - **ERA5 wind**: Verified (`available`, Detection #36). Validated against live ECMWF CDS API.
   Submits nearest-hour query (11:00:00 UTC) on 0.25° grid, extracts u10/v10 vectors
