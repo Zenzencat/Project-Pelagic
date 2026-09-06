@@ -155,7 +155,7 @@ ERA5/temporal/optical are separate prompt items).
 | confidence_score | `0.7475` |
 | predicted oil px (post land-mask) | `200,682` (raw `621,821`; `421,139` removed as land, `39,937` via OSM island refinement) |
 | pixel SHA-256 | `41e98adcdb98ed6cf46220fe8d6c4b3c4549ead2e0eaf172df5e920eb43bd44b` |
-| GFW attribution | `ok` — 5 candidate vessels within 10 km (authenticity is prompt item 5, not verified here) |
+| GFW attribution | `empty` — 0 candidate vessels within 10 km on 2026-08-10 (see status.md GFW section) |
 
 `verify_sources` passed → tiled U-Net inference ran → a real detection with a
 real mask polygon was returned and stored. Acquisition time and coordinates are

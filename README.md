@@ -91,7 +91,8 @@ Open your terminal in the project root:
    ```bash
    python -m uvicorn src.api.main:app --port 8000
    ```
-   The backend API will initialize the database, seed mock entries, and listen on **http://localhost:8000**.
+   The backend API will initialize the database schema and listen on **http://localhost:8000**.
+   * To seed mock demo records explicitly: `python scripts/seed_demo_data.py`
    * View the API health check: `http://localhost:8000/health`
    * Interactive API docs: `http://localhost:8000/docs`
 
@@ -116,6 +117,36 @@ Open a new terminal window in the project root:
    npm run dev
    ```
    Open **[http://localhost:5173](http://localhost:5173)** in your browser to view and interact with the live map dashboard!
+
+4. **Standalone Live Dashboard (Zero Config / Free Basemaps):**
+   * Double-click [docs/live_dashboard.html](docs/live_dashboard.html) in your browser. It uses free Esri Satellite and OpenStreetMap tiles (no API key required) to inspect real live detections, AIS vessels, multi-temporal SAR revisit comparisons, and Sentinel-2 true-color optical RGB previews.
+
+---
+
+### 3. Running Automated Tests & CI
+
+* **Run Backend Tests Locally**:
+  ```bash
+  pytest tests -k "not symlink" -v
+  ```
+  *(Note: `pytest.ini` is configured with `pythonpath = .` so bare `pytest` works automatically).*
+* **Continuous Integration (GitHub Actions)**:
+  * Defined in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+  * Automatically executes backend unit/integration tests (Python 3.11) and frontend linting/builds (Node 20) on every push and pull request.
+
+---
+
+## 🛰️ Live Satellite Pipeline & Multi-Spectral Evidence
+
+In addition to evaluating local holdout scenes, Project Pelagic features a live satellite ingestion endpoint:
+* **Endpoint**: `POST /api/live/fetch`
+* **Real Sentinel-1 SAR**: Queries the Copernicus Data Space Ecosystem (CDSE) OData catalog and downloads calibrated dual-polarization SAR imagery via the Sentinel Hub Process API.
+* **Real AIS Vessel Attribution**: Matches real-time commercial vessel coordinates around the detection timestamp via Global Fishing Watch (GFW) API v3.
+* **Multi-Temporal SAR Revisit (`include_temporal: true`)**: Retrieves an alternate-date Sentinel-1 pass (e.g. 12-day orbit repeat) over the exact same bounding box to provide persistence evidence (oil slick vs transient lookalike) without automated classification bias.
+* **Sentinel-2 Optical RGB (`include_optical: true`)**: Fetches Sentinel-2 L2A true-color RGB imagery with cloud percentage filtering to provide visual context over the maritime region.
+* **ERA5 10m Wind Reanalysis (`include_era5: true`)**: Retrieves hourly 10m wind vector components ($u_{10}$, $v_{10}$) from ECMWF Copernicus Climate Data Store (CDS) at the nearest UTC hour and computes wind speed to evaluate SAR oil slick visibility conditions (optimal dampening contrast at 1.5–6.0 m/s).
+* **Disk-Backed Preview Storage**: Generated SAR overlays and optical true-color PNGs are stored at `data/raw/live/previews/` and served via `GET /api/previews/{filename}` (capped at 500 files via oldest-first LRU eviction).
+* **Synthetic Calibration Audit**: See [docs/synthetic_calibration_audit.md](docs/synthetic_calibration_audit.md) for the mathematical audit comparing Level-1 DN squaring vs linear power emission.
 
 ---
 

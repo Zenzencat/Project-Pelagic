@@ -123,3 +123,21 @@ def test_fetch_validates_pixels_and_interval(monkeypatch, tmp_path):
     files['validity.tif'] = tiff(np.ones((256, 256), dtype=np.uint8))
     with pytest.raises(CdseFetchError):
         fetch_scene_geotiff('test', 2, 103, 2.01, 103.01, selected['start'], path, product=selected)
+
+
+def test_verify_sources_s2_bounded_window():
+    from src.data.sentinel_process import verify_sources
+    selected = {
+        'id': 's2-test-id',
+        'name': 'S2A_MSIL2A_20260822T032539_N0511_R018_T48NRU_20260822T065000.SAFE',
+        'start': '2026-08-22T03:25:39.024Z',
+        'end': '2026-08-22T03:25:39.024Z',
+    }
+    # Within +-30 min window (e.g. granule sensed 15 minutes into pass)
+    valid_tile = {'sentinel2ProductId': selected['name'], 'date': '2026-08-22T03:40:00Z'}
+    assert verify_sources({'tiles': [valid_tile]}, selected, 'S2')['status'] == 'verified'
+
+    # Outside +-30 min window on the same calendar day must be rejected
+    late_tile = {'sentinel2ProductId': selected['name'], 'date': '2026-08-22T06:50:00Z'}
+    with pytest.raises(ValueError, match='Process source date differs'):
+        verify_sources({'tiles': [late_tile]}, selected, 'S2')

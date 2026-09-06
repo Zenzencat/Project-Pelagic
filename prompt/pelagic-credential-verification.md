@@ -114,3 +114,36 @@ from `prompt/pelagic-loop.md` §7. Do not guess-fix by adding retries or
 fallback values. A real external failure (expired license, rate limit,
 network issue) is a valid, honestly-documented outcome — it is not something
 to paper over.
+
+---
+
+## 8. Verification Results (Completed 2026-09-06)
+
+* **Preconditions**:
+  * `CDSE_CLIENT_ID` and `CDSE_CLIENT_SECRET`: Verified authenticated via Copernicus OAuth2.
+  * `GFW_TOKEN`: Verified authenticated via Global Fishing Watch v3 API.
+  * `CDSAPI_URL` and `CDSAPI_KEY`: Verified authenticated via ECMWF Climate Data Store API (`scripts/validate_credentials.py` returned PASS).
+* **Primary Sentinel-1 SAR End-to-End**:
+  * Singapore Strait test area `bbox=[1.1, 103.7, 1.3, 103.9]`.
+  * Fetched acquisition `2026-08-10T11:24:44Z`, dual-polarization calibrated raster processed via U-Net (Detection #31, #32, and #36).
+* **ERA5 Wind Reanalysis (§2)**:
+  * Verified live via `POST /api/live/fetch` with `include_era5: true` (Detection #36).
+  * Retrieved hourly 10m wind vector for scene center (`1.20°N, 103.80°E`) at nearest whole UTC hour (`2026-08-10T11:00:00+00:00`).
+  * Grid point: `(1.15°N, 103.75°E)` on 0.25° grid.
+  * Vectors: `u10_ms = -1.9157 m/s`, `v10_ms = +4.3549 m/s`.
+  * Wind speed: `hypot(u10, v10) = 4.7576 m/s` (gentle breeze, within physical 1.5–6.0 m/s SAR oil-slick visibility window).
+  * Persisted honestly in SQLite `pelagic.db` with `status: "available"` and coarse-resolution disclosure.
+* **Multi-Temporal Revisit Check**:
+  * Revisit candidate `2026-08-22T11:24:44Z` (`f2d1b36f..._COG.SAFE`) matched and downloaded.
+  * Solved packaging name difference in `verify_sources()` by normalizing the `_COG` suffix, comparing full product identity, orbit, and hash.
+  * Returned `status: "available"` with comparison SAR and overlay previews.
+* **Sentinel-2 Optical RGB**:
+  * Candidate `2026-08-22` (13.1% cloud cover) matched.
+  * Solved granule sensing time offset in Process API by expanding query window $\pm30$ minutes.
+  * Returned `status: "available"` with true-color RGB preview.
+* **GFW AIS Vessel Attribution**:
+  * Returned `status: "empty"` on 2026-08-10 (honest zero-presence degradation without fabrication).
+  * Real vessels verified on adjacent dates: 2026-08-09 (`KST SUPER`, `PSA HULK CS04`, `KST KIJANG`, `PILOT GP01`, `FORCE`) and 2026-08-11 (`SC6336G`, `PILOT GP54`, `PILOT GP47`, `PILOT GP53`, `PILOT 12`).
+* **Artifacts & Previews**:
+  * Full JSON payload persisted in `docs/last_live_fetch_result.json`.
+  * Previews saved to `data/raw/live/previews/` and rendered in `docs/live_dashboard.html`.

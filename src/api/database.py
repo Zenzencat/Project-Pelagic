@@ -21,8 +21,8 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    """Initializes tables and seeds mock records if database is new/empty."""
+def init_db(seed_demo=True):
+    """Initializes tables and migrations. Auto-seeds demo data if empty unless seed_demo=False."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -124,12 +124,30 @@ def init_db():
         cursor.execute("ALTER TABLE detections ADD COLUMN supplementary_json TEXT;")
         conn.commit()
 
-    # 3. Seed mock data if empty
-    cursor.execute("SELECT COUNT(*) FROM detections;")
-    if cursor.fetchone()[0] == 0:
-        print("[*] Database is empty. Seeding mock oil slick detections and vessels...")
-        
-        # Mock 1: Gulf of Thailand
+    if seed_demo:
+        seed_demo_data(conn)
+
+    conn.close()
+
+
+def seed_demo_data(conn=None):
+    """Explicitly seeds mock detection records and correlated vessels for demos."""
+    should_close = False
+    if conn is None:
+        conn = get_db_connection()
+        should_close = True
+
+    cursor = conn.cursor()
+
+    # Check if mock scenes are already present
+    cursor.execute("SELECT scene_id FROM detections WHERE scene_id IN (?, ?);",
+                   ("S1A_IW_GRDH_1SDV_20260627T101402", "S1B_IW_GRDH_1SDV_20260625T220815"))
+    existing_scenes = {row[0] for row in cursor.fetchall()}
+
+    seeded_count = 0
+
+    # Mock 1: Gulf of Thailand
+    if "S1A_IW_GRDH_1SDV_20260627T101402" not in existing_scenes:
         mock1_geojson = {
             "type": "Polygon",
             "coordinates": [[
@@ -155,17 +173,19 @@ def init_db():
             "data/synthetic/masks/S1A_IW_GRDH_1SDV_20260627T101402_mask.png"
         ))
         det1_id = cursor.lastrowid
-        
+
         cursor.executemany("""
         INSERT INTO nearby_vessels (detection_id, mmsi, vessel_name, latitude, longitude, timestamp, distance_meters)
         VALUES (?, ?, ?, ?, ?, ?, ?);
         """, [
             (det1_id, 235085320, "MV Sea Voyager", 9.11, 101.64, "2026-06-27 10:12:00", 12400.0),
-            (det1_id, 477123900, "Global Gas Carrier", 9.32, 101.40, "2026-06-27 10:15:30, ", 18200.0),
+            (det1_id, 477123900, "Global Gas Carrier", 9.32, 101.40, "2026-06-27 10:15:30", 18200.0),
             (det1_id, 567010243, "Thai Fishing Vessel 09", 9.19, 101.53, "2026-06-27 10:13:45", 3500.0)
         ])
-        
-        # Mock 2: Andaman Sea (near Phuket)
+        seeded_count += 1
+
+    # Mock 2: Andaman Sea (near Phuket)
+    if "S1B_IW_GRDH_1SDV_20260625T220815" not in existing_scenes:
         mock2_geojson = {
             "type": "Polygon",
             "coordinates": [[
@@ -188,16 +208,24 @@ def init_db():
             "data/synthetic/masks/S1B_IW_GRDH_1SDV_20260625T220815_mask.png"
         ))
         det2_id = cursor.lastrowid
-        
+
         cursor.execute("""
         INSERT INTO nearby_vessels (detection_id, mmsi, vessel_name, latitude, longitude, timestamp, distance_meters)
         VALUES (?, ?, ?, ?, ?, ?, ?);
         """, (det2_id, 354921000, "LPG Pioneer", 7.80, 98.26, "2026-06-25 22:05:00", 8700.0))
-        
-        conn.commit()
-        print("[+] Mock database seeding completed successfully.")
-        
-    conn.close()
+        seeded_count += 1
+
+    conn.commit()
+    if seeded_count > 0:
+        print(f"[+] Seeded {seeded_count} demo detection(s) and vessels.")
+    else:
+        print("[*] Demo detections already present, no new records seeded.")
+
+    if should_close:
+        conn.close()
+
+    return seeded_count
+
 
 if __name__ == "__main__":
     init_db()

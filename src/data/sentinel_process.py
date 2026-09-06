@@ -41,11 +41,19 @@ def verify_sources(metadata, product, sensor):
     start, end = acquisition_time(product['start']), acquisition_time(product['end'])
     for tile in tiles:
         name = tile.get('sentinel1ProductId' if sensor == 'S1' else 'sentinel2ProductId')
-        if not isinstance(name, str) or name.removesuffix('.SAFE') != expected_name:
+        if not isinstance(name, str):
+            raise ValueError('Process response contains an unidentified product')
+        tile_name = name.removesuffix('.SAFE')
+        if tile_name != expected_name and tile_name.removesuffix('_COG') != expected_name.removesuffix('_COG'):
             raise ValueError('Process response contains a different or unidentified product')
         dt = acquisition_time(tile['date'])
-        # Catalog timestamps have subsecond precision; Process dates may be seconds.
-        if not start.replace(microsecond=0) <= dt <= end:
-            raise ValueError('Process source date differs from catalog acquisition')
+        # S1 slices are within seconds; S2 granule sensing times can be ~10-20m into the pass within the query window
+        if sensor == 'S1':
+            if not start.replace(microsecond=0) <= dt <= end:
+                raise ValueError('Process source date differs from catalog acquisition')
+        else:
+            from datetime import timedelta
+            if not (start - timedelta(minutes=30) <= dt <= end + timedelta(minutes=30)):
+                raise ValueError('Process source date differs from catalog acquisition')
     return {'status': 'verified', 'catalog_product_id': product['id'],
             'catalog_product_name': product['name'], 'tiles': tiles}

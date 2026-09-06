@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Pelagic — Live SAR Oil Slick & AIS Vessel Dashboard</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-dark: #090a0f;
+      --bg-panel: rgba(18, 22, 34, 0.85);
+      --bg-card: rgba(28, 33, 50, 0.7);
+      --bg-card-hover: rgba(40, 48, 72, 0.9);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --cyan: #06b6d4;
+      --cyan-glow: rgba(6, 182, 212, 0.25);
+      --oil-color: #f43f5e;
+      --vessel-color: #f59e0b;
+      --success: #10b981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 420px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      z-index: 1000;
+      box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    }
+
+    .header {
+      padding: 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(10, 14, 23, 0.9);
+    }
+    .header h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .badge-live {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .header p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 0.35rem;
+    }
+
+    /* Detection List */
+    .list-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .list-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .det-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .det-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(6, 182, 212, 0.4);
+      transform: translateY(-1px);
+    }
+    .det-card.active {
+      border-color: var(--cyan);
+      box-shadow: 0 0 15px var(--cyan-glow);
+      background: rgba(6, 182, 212, 0.08);
+    }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.4rem;
+    }
+    .card-id {
+      font-weight: 600;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .card-badge {
+      font-size: 0.68rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .badge-real-live {
+      background: rgba(244, 63, 94, 0.15);
+      color: #fb7185;
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+    .badge-cached {
+      background: rgba(148, 163, 184, 0.15);
+      color: #94a3b8;
+    }
+    .card-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .confidence-bar {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      margin-top: 0.5rem;
+      overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #06b6d4, #10b981);
+    }
+
+    /* Details Panel */
+    .details-panel {
+      padding: 1rem;
+      border-top: 1px solid var(--border-color);
+      background: rgba(10, 14, 23, 0.95);
+      max-height: 45vh;
+      overflow-y: auto;
+    }
+    .detail-section-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--cyan);
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      margin-bottom: 0.8rem;
+    }
+    .preview-box {
+      background: #000;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      overflow: hidden;
+      text-align: center;
+    }
+    .preview-box img {
+      width: 100%;
+      height: 110px;
+      object-fit: cover;
+      display: block;
+    }
+    .preview-box span {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      padding: 0.2rem;
+      display: block;
+      background: rgba(0,0,0,0.6);
+    }
+
+    .vessel-chip {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 6px;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.75rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .vessel-name { font-weight: 600; color: #fcd34d; }
+    .vessel-mmsi { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; }
+
+    /* Map Area */
+    #map {
+      flex: 1;
+      height: 100%;
+      background: #0b0f19;
+    }
+
+    /* Custom Leaflet Controls */
+    .leaflet-container {
+      background: #0b0f19 !important;
+    }
+    .custom-tooltip {
+      background: rgba(15, 23, 42, 0.92) !important;
+      border: 1px solid var(--cyan) !important;
+      color: #fff !important;
+      font-family: 'Inter', sans-serif !important;
+      font-size: 0.75rem !important;
+      border-radius: 6px !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="header">
+      <h1>
+        <span>🌊 Project Pelagic</span>
+        <span class="badge-live">Live API</span>
+      </h1>
+      <p>Sentinel-1 SAR Radar Oil Slick & AIS Vessel Attribution</p>
+    </div>
+
+    <!-- Detection List -->
+    <div class="list-container">
+      <div class="list-title">
+        <span>Detections in Database</span>
+        <button id="btn-refresh" style="background:none; border:none; color:var(--cyan); cursor:pointer; font-size:0.75rem;">↻ Refresh</button>
+      </div>
+      <div id="detection-cards">Loading detections from API...</div>
+    </div>
+
+    <!-- Active Details Panel -->
+    <div class="details-panel" id="details-panel">
+      <div class="detail-section-title">Detection Details</div>
+      <div id="selected-info">Select a detection to view satellite and vessel data.</div>
+    </div>
+  </div>
+
+  <!-- Map Container -->
+  <div id="map"></div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+    
+    // Initialize Leaflet Map (Dark Basemap)
+    const map = L.map('map', {
+      center: [1.2, 103.8],
+      zoom: 11,
+      zoomControl: false
+    });
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    // Base layers: OpenStreetMap & Esri Satellite (no API key required)
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19
+    });
+
+    const esriSatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+      maxZoom: 18
+    });
+
+    // Default to Satellite view for maritime radar inspection
+    esriSatellite.addTo(map);
+
+    L.control.layers({
+      "🛰️ Satellite (Esri)": esriSatellite,
+      "🗺️ OpenStreetMap": osm
+    }, null, { position: 'topright' }).addTo(map);
+
+    // Layer Groups
+    const footprintLayer = L.layerGroup().addTo(map);
+    const slickLayer = L.layerGroup().addTo(map);
+    const vesselLayer = L.layerGroup().addTo(map);
+
+    let detections = [];
+    let currentDet = null;
+
+    async function loadDetections() {
+      const container = document.getElementById('detection-cards');
+      try {
+        const res = await fetch(`${API_BASE}/api/detections`);
+        detections = await res.json();
+        
+        if (!detections.length) {
+          container.innerHTML = `<div style="color:var(--text-muted); font-size:0.8rem;">No detections found.</div>`;
+          return;
+        }
+
+        container.innerHTML = "";
+        // Sort with newest / highest ID first
+        detections.sort((a, b) => b.id - a.id);
+
+        detections.forEach(d => {
+          const isLive = d.source === "live";
+          const card = document.createElement('div');
+          card.className = `det-card ${currentDet && currentDet.id === d.id ? 'active' : ''}`;
+          card.id = `card-${d.id}`;
+          card.innerHTML = `
+            <div class="card-top">
+              <span class="card-id">#${d.id} ${d.scene_id}</span>
+              <span class="card-badge ${isLive ? 'badge-real-live' : 'badge-cached'}">${isLive ? 'LIVE' : 'DEMO'}</span>
+            </div>
+            <div class="card-meta">
+              <span>Confidence: ${(d.confidence_score * 100).toFixed(1)}%</span>
+              <span>Time: ${d.acquisition_start_utc ? d.acquisition_start_utc.slice(0, 19).replace('T', ' ') + ' UTC' : d.detected_at}</span>
+              <span>Attribution: ${d.vessel_attribution_status || 'N/A'}</span>
+            </div>
+            <div class="confidence-bar">
+              <div class="confidence-fill" style="width: ${(d.confidence_score * 100)}%"></div>
+            </div>
+          `;
+          card.onclick = () => selectDetection(d.id);
+          container.appendChild(card);
+        });
+
+        // Automatically select the latest detection (Detection 31)
+        if (!currentDet && detections.length) {
+          selectDetection(detections[0].id);
+        }
+      } catch (err) {
+        container.innerHTML = `<div style="color:#ef4444; font-size:0.8rem;">Error connecting to API: ${err.message}. Make sure backend is running on port 8000.</div>`;
+      }
+    }
+
+    async function selectDetection(id) {
+      document.querySelectorAll('.det-card').forEach(c => c.classList.remove('active'));
+      const activeCard = document.getElementById(`card-${id}`);
+      if (activeCard) activeCard.classList.add('active');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/detections/${id}`);
+        const det = await res.json();
+        currentDet = det;
+        renderDetails(det);
+        renderMap(det);
+      } catch (err) {
+        console.error("Failed to load details:", err);
+      }
+    }
+
+    function renderDetails(det) {
+      const container = document.getElementById('selected-info');
+      const supp = det.supplementary || {};
+      const vessels = det.nearby_vessels || [];
+
+      let previewsHtml = "";
+      const orig = supp.original || supp;
+      if (orig.sar_preview && orig.overlay_preview) {
+        previewsHtml += `
+          <div class="detail-section-title" style="margin-top:0.4rem;">Primary SAR Observation (${det.acquisition_start_utc ? det.acquisition_start_utc.slice(0, 10) : ''})</div>
+          <div class="preview-grid">
+            <div class="preview-box">
+              <img src="${API_BASE}${orig.sar_preview}" alt="SAR Preview" />
+              <span>Raw Sentinel-1 SAR (dB)</span>
+            </div>
+            <div class="preview-box">
+              <img src="${API_BASE}${orig.overlay_preview}" alt="Overlay Preview" />
+              <span>U-Net Mask + Land Filter</span>
+            </div>
+          </div>
+        `;
+      }
+
+      // Temporal SAR Revisit Comparison
+      if (supp.temporal && supp.temporal.status === "available" && supp.temporal.observations && supp.temporal.observations.length) {
+        const comp = supp.temporal.observations[0];
+        previewsHtml += `
+          <div class="detail-section-title" style="margin-top:0.4rem; color:#a855f7;">Revisit SAR Comparison (${comp.acquisition_start_utc ? comp.acquisition_start_utc.slice(0, 10) : ''})</div>
+          <div class="preview-grid">
+            <div class="preview-box">
+              <img src="${API_BASE}${comp.sar_preview}" alt="Comparison SAR" />
+              <span>Revisit SAR Pass (dB)</span>
+            </div>
+            <div class="preview-box">
+              <img src="${API_BASE}${comp.overlay_preview}" alt="Comparison Overlay" />
+              <span>Revisit U-Net Detection</span>
+            </div>
+          </div>
+        `;
+      }
+
+      // Sentinel-2 Optical RGB
+      if (supp.optical && supp.optical.status === "available" && supp.optical.observation) {
+        const opt = supp.optical.observation;
+        previewsHtml += `
+          <div class="detail-section-title" style="margin-top:0.4rem; color:#10b981;">Sentinel-2 Optical RGB (${opt.acquisition_start_utc ? opt.acquisition_start_utc.slice(0, 10) : ''} · ${opt.cloud_cover_pct ? opt.cloud_cover_pct.toFixed(1) : ''}% cloud)</div>
+          <div class="preview-box" style="margin-bottom:0.8rem;">
+            <img src="${API_BASE}${opt.rgb_preview}" alt="Sentinel-2 Optical RGB" style="height:140px;" />
+            <span>Atmospherically Corrected True-Color (B04/B03/B02)</span>
+          </div>
+        `;
+      }
+
+      let vesselsHtml = "";
+      if (vessels.length) {
+        vesselsHtml = vessels.map(v => `
+          <div class="vessel-chip">
+            <div>
+              <div class="vessel-name">🚢 ${v.vessel_name || 'Vessel'}</div>
+              <div class="vessel-mmsi">MMSI: ${v.mmsi}</div>
+            </div>
+            <div style="font-size:0.7rem; color:var(--text-muted); text-align:right;">
+              ${(v.distance_meters / 1000).toFixed(1)} km<br>
+              ${v.timestamp || ''}
+            </div>
+          </div>
+        `).join('');
+      } else {
+        vesselsHtml = `<div style="font-size:0.75rem; color:var(--text-muted);">No vessels within search radius.</div>`;
+      }
+
+      container.innerHTML = `
+        <div style="font-size:0.85rem; font-weight:600; margin-bottom:0.3rem;">Scene: ${det.scene_id}</div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.6rem;">
+          Product: <span style="font-family:'JetBrains Mono',monospace;">${det.cdse_product_id || 'N/A'}</span>
+        </div>
+        ${previewsHtml}
+        <div class="detail-section-title" style="margin-top:0.6rem;">Nearby AIS Vessels (${vessels.length})</div>
+        ${vesselsHtml}
+      `;
+    }
+
+    function renderMap(det) {
+      footprintLayer.clearLayers();
+      slickLayer.clearLayers();
+      vesselLayer.clearLayers();
+
+      const [minLat, minLon, maxLat, maxLon] = det.bbox;
+      const center = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
+
+      // 1. Draw Bounding Box / Footprint
+      const bounds = [[minLat, minLon], [maxLat, maxLon]];
+      L.rectangle(bounds, {
+        color: '#06b6d4',
+        weight: 1.5,
+        fillColor: '#06b6d4',
+        fillOpacity: 0.05,
+        dashArray: '4, 4'
+      }).addTo(footprintLayer).bindTooltip("Sentinel-1 Observation Footprint", { className: 'custom-tooltip' });
+
+      // 2. Draw GeoJSON Slick Mask
+      if (det.geojson_mask && det.geojson_mask.coordinates) {
+        L.geoJSON(det.geojson_mask, {
+          style: {
+            color: '#f43f5e',
+            weight: 2,
+            fillColor: '#f43f5e',
+            fillOpacity: 0.55
+          },
+          onEachFeature: (feature, layer) => {
+            layer.bindTooltip(`<b>Detected Oil Slick</b><br>Confidence: ${(det.confidence_score * 100).toFixed(1)}%`, { className: 'custom-tooltip' });
+          }
+        }).addTo(slickLayer);
+      }
+
+      // 3. Draw Vessels
+      if (det.nearby_vessels) {
+        det.nearby_vessels.forEach(v => {
+          // Connecting line to center of detection
+          L.polyline([[v.latitude, v.longitude], center], {
+            color: 'rgba(245, 158, 11, 0.4)',
+            weight: 1,
+            dashArray: '2, 5'
+          }).addTo(vesselLayer);
+
+          L.circleMarker([v.latitude, v.longitude], {
+            radius: 7,
+            fillColor: '#f59e0b',
+            color: '#ffffff',
+            weight: 2,
+            fillOpacity: 1
+          }).addTo(vesselLayer).bindTooltip(`
+            <b>${v.vessel_name || 'Vessel'}</b><br>
+            MMSI: ${v.mmsi}<br>
+            Distance: ${(v.distance_meters / 1000).toFixed(2)} km
+          `, { className: 'custom-tooltip' });
+        });
+      }
+
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    document.getElementById('btn-refresh').onclick = loadDetections;
+    loadDetections();
+  </script>
+</body>
+</html>

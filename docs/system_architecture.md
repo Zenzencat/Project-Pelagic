@@ -78,10 +78,17 @@ graph TD
 * **AIS Overlay**: Pulls coordinates of nearby vessels from the backend to overlay AIS tracks, allowing operators to visually correlate oil slicks with vessels in the vicinity.
 
 ### 3.2 FastAPI Backend
-* **`POST /api/predict`**: Accepts a scene ID, reads the matching GeoTIFF, runs preprocessing, tiles the scene into 256x256 patches (matching the training/eval patch regime — see `src/inference.py`), runs U-Net segmentation over each tile, stitches the result, traces contours into a GeoJSON polygon, and logs the detection to SQLite.
+* **`POST /api/predict`**: Accepts a local scene ID, reads the matching GeoTIFF, runs preprocessing, tiles the scene into 256x256 patches (matching the training/eval patch regime — see `src/inference.py`), runs U-Net segmentation over each tile, stitches the result, traces contours into a GeoJSON polygon, and logs the detection to SQLite.
+* **`POST /api/live/fetch`**: Live satellite pipeline. Accepts bounding box coordinates, queries the Copernicus Data Space Ecosystem (CDSE) OData catalog, fetches calibrated dual-pol SAR via Sentinel Hub Process API, runs tiled inference and OpenStreetMap land masking, and matches real nearby AIS vessels via Global Fishing Watch (GFW). Supports opt-in supplementary evidence:
+  * **Multi-Temporal SAR Revisit (`include_temporal`)**: Fetches alternate-date Sentinel-1 acquisitions over the same footprint to check for feature persistence.
+  * **Sentinel-2 Optical RGB (`include_optical`)**: Fetches Sentinel-2 L2A true-color imagery with cloud filtering for visual context.
+  * **ERA5 Wind Check (`include_era5`)**: Queries CDS for scene-center 10m wind speed vectors (gracefully degrades to `not_configured` when credentials are not supplied).
+* **`GET /api/previews/{filename}`**: Serves disk-stored high-resolution preview images (`data/raw/live/previews/`) with filename validation, path traversal prevention, and LRU eviction.
 * **`GET /api/detections`**: Queries the SQLite database to fetch historical detections with coordinates, timestamps, and confidence scores for rendering on the map.
-* **`GET /api/detections/{id}`**: Fetches one detection's full detail, including its associated (mock) nearby AIS vessels.
+* **`GET /api/detections/{id}`**: Fetches one detection's full detail, including its associated nearby AIS vessels and supplementary evidence.
 * **`GET /health`**: Reports API and model-load status.
+* **Database & Seeding Strategy**: `init_db(seed_demo=False)` ensures startup creates clean tables without injecting mock data. Explicit seeding is provided by `python scripts/seed_demo_data.py`.
+* **Continuous Integration**: `.github/workflows/ci.yml` runs automated regression tests on push/PR.
 
 ### 3.3 U-Net Inference Engine
 * **Plain PyTorch**: Inference runs directly against the trained `.pt` checkpoint via `torch.load` / `model.eval()` — there is no ONNX export step. The model is a from-scratch 4-level U-Net (`DoubleConv` blocks, no pretrained backbone), loaded once at API startup and reused across requests.

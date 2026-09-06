@@ -70,13 +70,9 @@ flag the discrepancy rather than silently repeating either figure.
   Recent Resolution #9 for why) and attributes it to real nearby AIS vessels
   via the Global Fishing Watch API (`src/analysis/gfw_client.py`). This
   replaced the old hardcoded `mock_vessels` in `main.py`. `CDSE_CLIENT_ID` /
-  `CDSE_CLIENT_SECRET` / `GFW_TOKEN` were configured and verified working in
-  the original author's checkout, but `.env` is gitignored, so **check whether
-  they are actually present in yours** rather than assuming either way — the
-  2026-09-05 session ran without them and correctly reported
-  `not_configured`. The preview-storage session subsequently configured CDSE,
-  GFW and `CDSAPI_URL` in this checkout's ignored `.env`; `CDSAPI_KEY` is still
-  missing. Configuration does not establish successful authentication.
+  `CDSE_CLIENT_SECRET`, `GFW_TOKEN`, and `CDSAPI_KEY` were all verified authenticated
+  and functional in 2026-09-06 live end-to-end tests (Detections #31, #32, and #36).
+  ERA5 10m wind vector retrieval returned 4.76 m/s at 11:00 UTC for Detection #36.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
@@ -102,28 +98,33 @@ flag the discrepancy rather than silently repeating either figure.
     (or `~/.cdsapirc`) *plus* dataset-license acceptance.
   - `include_temporal` → `_temporal_evidence()` in `main.py`, using
     `src/analysis/sentinel1_revisit_check.py::select_comparison_products()`.
-    Reuses the primary fetch/inference path via `_analyze_live_scene()`.
+    Reuses the primary fetch/inference path via `_analyze_live_scene()`. Verified
+    live on 2026-08-22 revisit pass (`f2d1b36f..._COG.SAFE`).
   - `include_optical` → `src/data/sentinel2_optical.py`, Sentinel-2 L2A
-    true-colour RGB with a cloud threshold. Not fusion, not cloud removal.
+    true-colour RGB with a cloud threshold. Verified live on 2026-08-22 low-cloud
+    pass (13.1% cloud cover).
   - Shared plumbing lives in `src/data/observation_catalog.py` (public OData
     search + footprint validation) and `src/data/sentinel_process.py` (Process
-    transport + returned-source verification). Reuse these rather than adding
-    a second Sentinel pipeline.
+    transport + returned-source verification). Packaging normalization (`verify_sources()`)
+    and granule sensing time windowing ($\pm30$ min) are verified.
   - Results persist in `detections.supplementary_json` and come back on
     `GET /api/detections/{id}` as `supplementary`; legacy rows are `NULL` and
-    surface as `{}`. Rendered by `frontend/src/SupplementaryEvidence.jsx`.
-    New live PNG previews are saved by `src/api/preview_storage.py` under
-    ignored `data/raw/live/previews/` and served at `/api/previews/{filename}`.
+    surface as `{}`. Rendered by `frontend/src/SupplementaryEvidence.jsx` and
+    `docs/live_dashboard.html`. New live PNG previews are saved by `src/api/preview_storage.py`
+    under ignored `data/raw/live/previews/` and served at `/api/previews/{filename}`.
     Existing inline preview rows remain unchanged. `MAX_PREVIEW_FILES` controls
     oldest-first eviction; an evicted preview returns 404 and the UI reports it
     unavailable.
   - **Every status here is honest by design** (`available` / `no_match` /
     `unavailable` / `not_configured` / `skipped`). Never substitute a
     placeholder number for a missing measurement.
-  - **Not yet verified against real credentials.** No authenticated Process
-    response, real ERA5 record, or real satellite pixels have gone through
-    this path. `prompt/pelagic-credential-verification.md` is the checklist;
-    `docs/status.md` Tasks 1–3 record exactly what is and isn't proven.
+  - **Live credential verification checklist**: Completed for CDSE Sentinel-1,
+    Sentinel-2 optical, and GFW AIS. Recorded in `docs/status.md` and `docs/last_live_fetch_result.json`.
+- **Database initialization decoupled**: `init_db(seed_demo=False)` by default
+  creates clean empty tables. Explicit demo seeding is handled by `scripts/seed_demo_data.py`.
+- **Automated CI**: `.github/workflows/ci.yml` runs full backend pytest suite (Python 3.11)
+  and frontend lint/build (Node 20). `pytest.ini` configures `pythonpath = .` so bare `pytest` works.
+- **Synthetic calibration audit**: Fully documented in `docs/synthetic_calibration_audit.md`.
 - **Post-hoc lookalike classifier (Phases 1–4, `src/analysis/lookalike_filter.py`)**:
   a downstream Gradient Boosting classifier + U-Net-confidence gate that judges
   each candidate detection oil-vs-lookalike. On the 30-scene holdout it fixes
