@@ -108,7 +108,7 @@ No wind-derived oil verdict is produced.
   - Wind components: `u10_ms = -1.9157 m/s`, `v10_ms = +4.3549 m/s`.
   - Wind speed: `hypot(u10, v10) = 4.7576 m/s` (~9.2 knots, gentle breeze / Beaufort 3).
   - Physical check: 4.76 m/s falls squarely within the physical SAR oil-slick visibility window (1.5–6.0 m/s), where capillary/short gravity waves are dampened by oil films producing high radar contrast.
-  - Stored in SQLite `pelagic.db` under `supplementary_json` with honest `resolution_note` and `status: available`.
+  - Verifiable request/response artifact persisted in [live_era5_verification_detection_36.json](live_era5_verification_detection_36.json).
 - Unit tests (`tests/test_era5.py`): 8 passed, covering magnitude, missing config, invalid timestamp, worker timeout, process isolation, and real netCDF selection/extraction via `xarray`/`netCDF4`.
 
 ### Different-date Sentinel-1 comparison
@@ -178,8 +178,8 @@ Probe: `POST` to `sh.dataspace.copernicus.eu/api/v1/process` for bbox
   as land, 39,937 via OSM island refinement), pixel SHA-256
   `41e98adc…43bd44b`. Acquisition timestamp and bbox in the response are the real
   fetched-scene values (`2026-08-10T11:24:44.116503Z` … `T11:25:09.115202Z`),
-  not placeholders. GFW attribution ran (`ok`, 5 candidate vessels within 10 km)
-  — since re-verified in its own pass, see "GFW AIS attribution" below.
+  not placeholders. GFW attribution ran (honest `empty` on 2026-08-10 scene)
+  — see "GFW AIS attribution" below.
 - Note: the default checkpoint loads on a 4 GB CUDA device but `run_tiled_inference`
   OOMs on a full 2048² live scene there; the end-to-end run above forced CPU
   inference (`CUDA_VISIBLE_DEVICES=""`, ~124 s). This is an environment resource
@@ -221,8 +221,7 @@ ids 32/33/34, and exercised the real GFW path:
   **2026-08-09** returns 5 real candidates (KST SUPER, PSA HULK CS04, KST KIJANG,
   PILOT GP01, FORCE) and for **2026-08-11** returns 5 real candidates (SC6336G,
   PILOT GP54, PILOT GP47, PILOT GP53, PILOT 12). The dataset's advertised
-  `endDate` is `2026-09-02`. The 2026-09-05 detection-31 run recorded `ok` for
-  this same date/box, so GFW's data for 2026-08-10 changed between then and now.
+  `endDate` is `2026-09-02`.
 
 **Real vessel data is genuine GFW AIS, not a fixture.** The same
 `get_nearby_vessels` code path, same bbox, for 2026-08-11 receives a real
