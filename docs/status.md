@@ -12,8 +12,9 @@ and historical verification remain in [status_history.md](status_history.md).
   in the ignored local `.env`, matching `/home/papajittan/Downloads/env`, with
   permissions 0600. Values are not reproduced
   in documentation. `CDSAPI_KEY` is still absent; real ERA5 access also requires
-  dataset-license acceptance. Configured credentials have not been authenticated
-  during this task.
+  dataset-license acceptance. The CDSE OAuth2 client credentials were
+  authenticated on 2026-09-05 (see "Live credential verification" below); a full
+  real `/api/live/fetch` completed end-to-end.
 - Python is 3.14.6. The current disposable environment is
   `/tmp/pelagic-preview-verify.wExiDS`, using system site packages plus xarray
   2026.7.0, netCDF4 1.7.4 and global-land-mask 1.0.0. Its resolver installed NumPy
@@ -21,9 +22,10 @@ and historical verification remain in [status_history.md](status_history.md).
   No project dependency pins or lockfiles were changed.
 - Real v2/v1 checkpoints and synthetic TIFFs are present. The requested
   `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs are absent.
-- This task moves previews out of new database writes. CDSE Process product-name
-  matching, external credential verification and DSen2-CR are outside its scope.
-  No satellite pixels, wind record or GFW data were fetched in this session.
+- The preview-storage task moved previews out of new database writes; DSen2-CR
+  is out of scope. CDSE Process product-name matching and credential
+  verification were completed separately on 2026-09-05 (real authenticated
+  Process response + full live fetch — see "Live credential verification").
 
 ## Preview storage
 
@@ -148,11 +150,57 @@ revisits. First-ranked alternative:
 The other dates are July 29, September 3 and July 17, 2026.
 See [live_catalog_verification.json](live_catalog_verification.json).
 
-This historical catalog result is not an authenticated pixel-fetch test.
-The primary name ends in `_COG.SAFE`; real Process source-identifier
-compatibility remains unverified. Dates, source metadata, fixed-stretch SAR
-previews and segmentation are presented as evidence, without persistence or
-oil classification. Orbit/sea-state/resampling differences remain limitations.
+Dates, source metadata, fixed-stretch SAR previews and segmentation are
+presented as evidence, without persistence or oil classification.
+Orbit/sea-state/resampling differences remain limitations.
+
+### Live credential verification — real authenticated Process response (2026-09-05)
+
+Checked against a **real authenticated Sentinel Hub Process response**, not
+just static-scoped code. CDSE OAuth2 client credentials in `.env`
+authenticated successfully (`validate_credentials.py` CDSE check: PASS).
+
+Probe: `POST` to `sh.dataspace.copernicus.eu/api/v1/process` for bbox
+`[1.1, 103.7, 1.3, 103.9]`, selected primary
+`d514853f-fc94-4799-b40e-c44e81412d0b`
+(`S1D_IW_GRDH_1SDV_20260810T112444_20260810T112509_004062_007671_C8DC_COG.SAFE`).
+
+- **`_COG` product-name matching: no mismatch.** The Process API reports the
+  tile under the identical identifier the catalog uses:
+  `sentinel1ProductId` = `"S1D_..._C8DC_COG.SAFE"`. After the `.SAFE` strip both
+  sides are `S1D_..._C8DC_COG`; `verify_sources` accepts it. The earlier concern
+  that Process would return a non-COG identifier is disproven against a real
+  response.
+- **A different, real blocker was found and fixed.** With the sub-second catalog
+  `product['start']` (`...T11:24:44.116503Z`) passed verbatim as the Process
+  `timeRange.from`, the API returned **zero tiles / all-zero pixels** — every
+  live fetch would fail at `verify_sources` ("lacks source tiles"). Sentinel Hub
+  filters on whole-second acquisition timestamps (`date: "2026-08-10T11:24:44Z"`),
+  so a sub-second `from` bound falls after the scene and excludes it.
+  `fetch_scene_geotiff` now floors `from` / ceils `to` to whole seconds.
+  `verify_sources`' name and date checks are unchanged and still reject a wrong
+  product (neighbouring slices are ~25 s away). Regression test
+  `tests/test_observations.py::test_process_identity_real_cog_product` uses the
+  verbatim captured name/ID pair; `test_fetch_validates_pixels_and_interval` now
+  uses a sub-second interval and asserts the widening. Suite: 61 passed, 1
+  skipped.
+- **Full live end-to-end (real, not cached): SUCCESS.** `POST /api/live/fetch`
+  for the same bbox/date range returned `status: OK`, detection id 31
+  (`live_ff555771a909`), persisted to `data/pelagic.db` with `supplementary_json`.
+  `verify_sources` passed (`provenance.status = "verified"`, tile id matches),
+  tiled U-Net inference ran (CPU — see note), confidence `0.7475`,
+  200,682 predicted oil px after land masking (421,139 of 621,821 raw px removed
+  as land, 39,937 via OSM island refinement), pixel SHA-256
+  `41e98adc…43bd44b`. Acquisition timestamp and bbox in the response are the real
+  fetched-scene values (`2026-08-10T11:24:44.116503Z` … `T11:25:09.115202Z`),
+  not placeholders. GFW attribution ran (`ok`, 5 candidate vessels within 10 km)
+  — noted separately, GFW remains covered by `prompt/pelagic-credential-verification.md` §5.
+- Note: the default checkpoint loads on a 4 GB CUDA device but `run_tiled_inference`
+  OOMs on a full 2048² live scene there; the end-to-end run above forced CPU
+  inference (`CUDA_VISIBLE_DEVICES=""`, ~124 s). This is an environment resource
+  limit, not a code defect, and is out of scope for this check.
+- Not verified here (separate prompt items): ERA5 wind, multi-temporal SAR pair,
+  Sentinel-2 optical, GFW vessel-data authenticity.
 
 ### Sentinel-2 L2A optical supplement
 
@@ -245,7 +293,9 @@ confusion_matrix_breakdown, region_coverage and phase4_confirm_* in docs.
 ## Next action
 
 Restore the three required holdout TIFFs to complete the handoff's six real
-inference checks. Separately, the pre-demo external check remains
-`prompt/pelagic-credential-verification.md`: confirm real Process source names,
-a different-date SAR pair and optical behavior with the configured credentials.
-ERA5 additionally needs `CDSAPI_KEY` and license acceptance.
+inference checks. The Process source-name check in
+`prompt/pelagic-credential-verification.md` is **done** (real authenticated
+response, `_COG` name matches, sub-second `timeRange` bug fixed, full live fetch
+completed — see "Live credential verification"). Still open from that prompt: a
+real different-date SAR pair, Sentinel-2 optical behavior, and GFW vessel-data
+authenticity. ERA5 additionally needs `CDSAPI_KEY` and license acceptance.

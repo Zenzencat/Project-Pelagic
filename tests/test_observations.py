@@ -66,12 +66,38 @@ def test_process_identity_and_date():
             verify_sources(bad, selected, 'S1')
 
 
+def test_process_identity_real_cog_product():
+    """Regression for the _COG/.SAFE naming case, using the VERBATIM product
+    name and Process `sentinel1ProductId` captured from a real authenticated
+    Sentinel Hub Process response for the Singapore Strait scene on
+    2026-09-05 (docs/status.md). The Process API reports the product under the
+    exact same `..._COG.SAFE` identifier the catalog uses, and the tile date
+    is truncated to whole seconds -- both must still verify, and a genuinely
+    different product id must still be rejected."""
+    from src.data.sentinel_process import verify_sources
+    selected = {
+        'id': 'd514853f-fc94-4799-b40e-c44e81412d0b',
+        'name': 'S1D_IW_GRDH_1SDV_20260810T112444_20260810T112509_004062_007671_C8DC_COG.SAFE',
+        'start': '2026-08-10T11:24:44.116503Z',
+        'end': '2026-08-10T11:25:09.115202Z',
+    }
+    tile = {'sentinel1ProductId': selected['name'], 'date': '2026-08-10T11:24:44Z'}
+    assert verify_sources({'tiles': [tile]}, selected, 'S1')['status'] == 'verified'
+    wrong = {'sentinel1ProductId':
+             'S1D_IW_GRDH_1SDV_20260822T112444_20260822T112509_004237_007C8B_F65B_COG.SAFE',
+             'date': '2026-08-10T11:24:44Z'}
+    with pytest.raises(ValueError):
+        verify_sources({'tiles': [wrong]}, selected, 'S1')
+
+
 def test_fetch_validates_pixels_and_interval(monkeypatch, tmp_path):
     import io
     import numpy as np
     import tifffile
     from src.data.cdse_fetch import fetch_scene_geotiff, CdseFetchError
-    selected = product()
+    # Sub-second acquisition interval, like the real catalog -- the fix floors
+    # `from` and ceils `to` to whole seconds before calling the Process API.
+    selected = product(start='2026-08-11T22:00:00.116503Z', end='2026-08-11T22:00:25.115202Z')
     def tiff(array):
         stream = io.BytesIO()
         tifffile.imwrite(stream, array, photometric='minisblack',
@@ -82,7 +108,11 @@ def test_fetch_validates_pixels_and_interval(monkeypatch, tmp_path):
     files = {'default.tif': tiff(np.ones((256, 256, 2), dtype=np.float32)),
              'validity.tif': tiff(np.ones((256, 256), dtype=np.uint8))}
     def process(token, body):
-        assert body['input']['data'][0]['dataFilter']['timeRange'] == {'from': selected['start'], 'to': selected['end']}
+        # Time bounds are floored/ceiled to whole seconds: Sentinel Hub filters
+        # on whole-second scene timestamps and a sub-second `from` bound returns
+        # zero tiles (verified against a real Process response, docs/status.md).
+        assert body['input']['data'][0]['dataFilter']['timeRange'] == {
+            'from': '2026-08-11T22:00:00Z', 'to': '2026-08-11T22:00:26Z'}
         return files, {'tiles': [{'sentinel1ProductId': selected['name'], 'date': selected['start']}]}
     monkeypatch.setattr('src.data.sentinel_process.process_request', process)
     path = tmp_path / 'scene.tif'

@@ -85,13 +85,24 @@ def fetch_scene_geotiff(token, min_lat, min_lon, max_lat, max_lon, acquisition_s
     import numpy as np
     import tifffile
     from src.data.sentinel_process import process_request, verify_sources
+    from src.data.observation_catalog import acquisition_time
     if product is None or product.get('start') != acquisition_start_iso or not product.get('end'):
         raise CdseFetchError('Real selected product identity and acquisition interval required')
     width, height = _output_size(min_lat, min_lon, max_lat, max_lon)
+    # Sentinel Hub filters scenes on whole-second acquisition timestamps, so the
+    # catalog's sub-second product['start'] passed verbatim as the `from` bound
+    # falls *after* the scene's truncated time and the Process API returns zero
+    # tiles (verified against a real response 2026-09-05, see docs/status.md).
+    # Widen to whole-second bounds; verify_sources still rejects any tile whose
+    # product name or date isn't the selected acquisition, and neighbouring
+    # slices are ~25 s away so this cannot pull in a different product.
+    start_dt, end_dt = acquisition_time(product['start']), acquisition_time(product['end'])
+    time_from = start_dt.replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+    time_to = (end_dt.replace(microsecond=0) + timedelta(seconds=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     body = {
         'input': {'bounds': {'bbox': [min_lon, min_lat, max_lon, max_lat]}, 'data': [{
             'type': 'sentinel-1-grd',
-            'dataFilter': {'timeRange': {'from': product['start'], 'to': product['end']},
+            'dataFilter': {'timeRange': {'from': time_from, 'to': time_to},
                            'resolution': 'HIGH', 'acquisitionMode': 'IW', 'polarization': 'DV'},
             'processing': {'backCoeff': 'SIGMA0_ELLIPSOID', 'orthorectify': True}}]},
         'output': {'width': width, 'height': height, 'responses': [
