@@ -67,7 +67,7 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
 - Live End-to-End Verification (Detection #31, #32, and #36 in `data/pelagic.db`):
   - Primary Sentinel-1 SAR acquisition (`2026-08-10T11:24:44Z`, Singapore Strait)
     analyzed with 74.75% confidence oil slick detected.
-  - GFW AIS attribution matched 5 real commercial vessels (`status: ok`).
+  - GFW AIS attribution returned honest `empty` for the 2026-08-10 scene (real candidates verified on 2026-08-09/11).
   - Multi-temporal comparison: revisit pass (`2026-08-22`) retrieved, validated via
     datatake matching, and segmented with `status: available`.
   - Sentinel-2 optical RGB: low-cloud scene (`2026-08-22`, 13.1% cloud cover) retrieved
@@ -216,16 +216,13 @@ ids 32/33/34, and exercised the real GFW path:
   (Runs 32 and 34; run 33 hit a transient `ConnectionResetError` from the GFW
   gateway and stored `error` — also honest, no fabricated data. The report
   endpoint intermittently resets connections; a retry succeeds.)
-- **GFW 2026-08-10 coverage reconciliation**:
-  During PR #7's test pass, GFW temporarily returned `{"total": 1, "entries": [{}]}` for
-  2026-08-10, successfully verifying the pipeline's honest `empty` degradation path without
-  fabricating vessel rows. In earlier runs (Detection #31 on 2026-09-05) and subsequent live
-  re-tests (Detection #32, #36, and direct API checks), GFW returned HTTP 200 with the full
-  `public-global-presence:latest` dataset for 2026-08-10 (11,000+ entries across the region).
-  The top-5 closest candidates within 10 km were real Singapore Strait commercial vessels:
-  `JMS BENAR` (MMSI 563442000), `VB MENANG` (MMSI 565333000), `OKEE JOHN T` (MMSI 636093142),
-  `PILOT GP57` (MMSI 563021460), and `NOBLE VEGA` (MMSI 563009220), all dated `2026-08-10`.
-  Both the empty degradation and the 5-vessel attribution are genuine GFW API outputs.
+- 2026-08-10 appears to be a **gap in GFW's `public-global-presence` coverage**,
+  not a real absence of ships in the Singapore Strait: the identical query for
+  **2026-08-09** returns 5 real candidates (KST SUPER, PSA HULK CS04, KST KIJANG,
+  PILOT GP01, FORCE) and for **2026-08-11** returns 5 real candidates (SC6336G,
+  PILOT GP54, PILOT GP47, PILOT GP53, PILOT 12). The dataset's advertised
+  `endDate` is `2026-09-02`. The 2026-09-05 detection-31 run recorded `ok` for
+  this same date/box, so GFW's data for 2026-08-10 changed between then and now.
 
 **Real vessel data is genuine GFW AIS, not a fixture.** The same
 `get_nearby_vessels` code path, same bbox, for 2026-08-11 receives a real
@@ -350,7 +347,7 @@ The live credential verification checklist in
 - **Real live Sentinel-1 detection**: Verified (Detection #31, #32, and #36). Downloaded
   calibrated SAR raster via CDSE Process API, ran tiled U-Net inference,
   executed OSM land masking, and persisted previews to disk.
-- **GFW AIS vessel attribution**: Verified (`ok`, 5 real nearby vessels matched).
+- **GFW AIS vessel attribution**: Verified (honest `empty` for 2026-08-10 scene; real commercial vessels confirmed on 2026-08-09 and 2026-08-11).
 - **Multi-temporal SAR comparison**: Verified (`available`). Prioritized COG products
   in ranking and supported packaging normalization via `removesuffix('_COG')` in `verify_sources()`,
   preserving 100% of product hash, orbit, and datatake identity. Candidate revisit product

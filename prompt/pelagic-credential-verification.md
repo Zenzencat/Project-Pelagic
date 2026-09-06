@@ -142,7 +142,8 @@ to paper over.
   * Solved granule sensing time offset in Process API by expanding query window $\pm30$ minutes.
   * Returned `status: "available"` with true-color RGB preview.
 * **GFW AIS Vessel Attribution**:
-  * Returned `status: "ok"` with 5 real nearby commercial vessels (`JMS BENAR`, `VB MENANG`, `OKEE JOHN T`, `PILOT GP57`, `NOBLE VEGA`).
+  * Returned `status: "empty"` on 2026-08-10 (honest zero-presence degradation without fabrication).
+  * Real vessels verified on adjacent dates: 2026-08-09 (`KST SUPER`, `PSA HULK CS04`, `KST KIJANG`, `PILOT GP01`, `FORCE`) and 2026-08-11 (`SC6336G`, `PILOT GP54`, `PILOT GP47`, `PILOT GP53`, `PILOT 12`).
 * **Artifacts & Previews**:
   * Full JSON payload persisted in `docs/last_live_fetch_result.json`.
   * Previews saved to `data/raw/live/previews/` and rendered in `docs/live_dashboard.html`.
