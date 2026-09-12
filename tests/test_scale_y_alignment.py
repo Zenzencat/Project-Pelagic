@@ -71,10 +71,10 @@ def test_polygon_vertices_stay_inside_the_scene_bounds(bbox, width, height):
     mask = np.zeros((height, width), dtype=np.uint8)
     mask[0:16, 0:16] = 255  # top-left corner, where a latitude-scale error is largest
 
-    rings = mask_to_polygons(mask, geo["center_lat"], geo["center_lon"], geo["scale"],
-                             scale_y=geo["scale_y"])
-    lats = [point[1] for ring in rings for point in ring]
-    assert rings and min_lat - 1e-6 <= min(lats) and max(lats) <= max_lat + 1e-6
+    polygons = mask_to_polygons(mask, geo["center_lat"], geo["center_lon"], geo["scale"],
+                                scale_y=geo["scale_y"])
+    lats = [point[1] for poly in polygons for ring in poly for point in ring]
+    assert polygons and min_lat - 1e-6 <= min(lats) and max(lats) <= max_lat + 1e-6
 
     # The land mask now judges that same top row at that same latitude.
     land_mask_top_lat = geo["center_lat"] + (height // 2) * geo["scale_y"]
