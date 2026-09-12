@@ -150,7 +150,7 @@ def seed_demo_data(conn=None):
     if "S1A_IW_GRDH_1SDV_20260627T101402" not in existing_scenes:
         mock1_geojson = {
             "type": "Polygon",
-            "coordinates": [[
+            "coordinates": [[[
                 [101.42, 9.25],
                 [101.45, 9.28],
                 [101.55, 9.22],
@@ -159,7 +159,7 @@ def seed_demo_data(conn=None):
                 [101.52, 9.18],
                 [101.45, 9.20],
                 [101.42, 9.25]
-            ]]
+            ]]]
         }
         cursor.execute("""
         INSERT INTO detections (scene_id, detected_at, confidence_score, bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon, geojson_mask, image_path)
@@ -188,13 +188,13 @@ def seed_demo_data(conn=None):
     if "S1B_IW_GRDH_1SDV_20260625T220815" not in existing_scenes:
         mock2_geojson = {
             "type": "Polygon",
-            "coordinates": [[
+            "coordinates": [[[
                 [98.12, 7.87],
                 [98.16, 7.90],
                 [98.22, 7.83],
                 [98.19, 7.81],
                 [98.12, 7.87]
-            ]]
+            ]]]
         }
         cursor.execute("""
         INSERT INTO detections (scene_id, detected_at, confidence_score, bbox_min_lat, bbox_min_lon, bbox_max_lat, bbox_max_lon, geojson_mask, image_path)

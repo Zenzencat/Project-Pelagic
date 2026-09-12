@@ -30,21 +30,33 @@ const DEMO_SCENES = [
 // per-pixel constant. Replaces the old hardcoded 14.5/8.5 km2 mock badge.
 const KM_PER_DEG_LAT = 111.32;
 
+function ringAreaKm2(ring, kmPerDegLon) {
+  let sum = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [lon1, lat1] = ring[i];
+    const [lon2, lat2] = ring[i + 1];
+    const x1 = lon1 * kmPerDegLon, y1 = lat1 * KM_PER_DEG_LAT;
+    const x2 = lon2 * kmPerDegLon, y2 = lat2 * KM_PER_DEG_LAT;
+    sum += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(sum) / 2;
+}
+
+// Each entry in geojson_mask.coordinates is one polygon: ring 0 is its
+// exterior, any further rings are holes cut out of it (see
+// src/analysis/contour.py::mask_to_polygons) -- subtract hole area rather
+// than summing every ring as if it were its own separate positive shape.
 function calcSlickAreaKm2(det) {
   if (!det || !det.geojson_mask || !det.geojson_mask.coordinates || !det.bbox) return 0;
   const centerLat = (det.bbox[0] + det.bbox[2]) / 2;
   const kmPerDegLon = KM_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180);
   let totalKm2 = 0;
-  for (const ring of det.geojson_mask.coordinates) {
-    let sum = 0;
-    for (let i = 0; i < ring.length - 1; i++) {
-      const [lon1, lat1] = ring[i];
-      const [lon2, lat2] = ring[i + 1];
-      const x1 = lon1 * kmPerDegLon, y1 = lat1 * KM_PER_DEG_LAT;
-      const x2 = lon2 * kmPerDegLon, y2 = lat2 * KM_PER_DEG_LAT;
-      sum += x1 * y2 - x2 * y1;
+  for (const poly of det.geojson_mask.coordinates) {
+    const [exterior, ...holes] = poly;
+    totalKm2 += ringAreaKm2(exterior, kmPerDegLon);
+    for (const hole of holes) {
+      totalKm2 -= ringAreaKm2(hole, kmPerDegLon);
     }
-    totalKm2 += Math.abs(sum) / 2;
   }
   return totalKm2;
 }
@@ -166,12 +178,14 @@ function getFitBounds(det) {
   if (!det) return null;
   if (hasRealDetection(det) && det.geojson_mask && det.geojson_mask.coordinates) {
     let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
-    for (const ring of det.geojson_mask.coordinates) {
-      for (const [lon, lat] of ring) {
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-        if (lon < minLon) minLon = lon;
-        if (lon > maxLon) maxLon = lon;
+    for (const poly of det.geojson_mask.coordinates) {
+      for (const ring of poly) {
+        for (const [lon, lat] of ring) {
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+          if (lon < minLon) minLon = lon;
+          if (lon > maxLon) maxLon = lon;
+        }
       }
     }
     if (Number.isFinite(minLat) && Number.isFinite(minLon) && Number.isFinite(maxLat) && Number.isFinite(maxLon)) {
@@ -734,8 +748,11 @@ export default function App() {
               {showSlick && hasRealDetection(selectedDet) && selectedDet.geojson_mask && selectedDet.geojson_mask.coordinates && (() => {
                 const strokeWeight = getSlickStrokeWeight(selectedDet.geojson_mask.coordinates.length);
                 return selectedDet.geojson_mask.coordinates.map((poly, pIdx) => {
-                  // GeoJSON holds [lon, lat], Leaflet needs [lat, lon]
-                  const leafPositions = poly.map(pt => [pt[1], pt[0]]);
+                  // GeoJSON holds [lon, lat], Leaflet needs [lat, lon]. `poly`
+                  // is [exterior, ...holes] -- Leaflet's own Polygon supports
+                  // a multi-ring positions array natively (later rings cut
+                  // holes out of the first), same convention as GeoJSON.
+                  const leafPositions = poly.map(ring => ring.map(pt => [pt[1], pt[0]]));
                   return (
                     <Polygon
                       key={pIdx}

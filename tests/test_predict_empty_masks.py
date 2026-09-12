@@ -168,4 +168,5 @@ def test_regular_mask_keeps_real_contour(api, client, monkeypatch):
     body = client.post("/api/predict", json={"scene_id": "regular"}).json()
     assert body["confidence_score"] == pytest.approx(0.9)
     assert body["geojson_mask"]["coordinates"]
-    assert len(body["geojson_mask"]["coordinates"][0]) >= 4
+    # coordinates[0] is the first polygon: [exterior_ring, *hole_rings].
+    assert len(body["geojson_mask"]["coordinates"][0][0]) >= 4
