@@ -647,6 +647,59 @@ Simulated the gate on the held-out validation split: gated examples (confidence 
 
 ---
 
+## Live ERA5 wind evidence: implemented and verified (2026-09-06)
+
+* **Status**: Done for live-fetched Sentinel-1 scenes. This does **not** add a
+  wind-based oil/lookalike classifier or change the U-Net score. It is optional
+  supplementary context for human review only.
+* `POST /api/live/fetch` accepts `include_era5: true` (default `false`). Once
+  the primary CDSE scene has supplied its real acquisition time and bounding
+  box, `src/analysis/era5_wind_check.py::get_wind_evidence()` queries the
+  separate ECMWF Climate Data Store (CDS) API for ERA5 hourly 10 m u/v wind
+  components at the scene centre, validates the returned NetCDF record, and
+  returns the components, magnitude, nearest valid UTC hour, and selected grid
+  node. It requires a personal CDS account/API key (`CDSAPI_URL` and
+  `CDSAPI_KEY`, or `.cdsapirc`); CDSE/Sentinel Hub credentials cannot be used
+  for this service. Missing credentials return `not_configured`; delayed,
+  invalid, or unavailable records return `unavailable` without a fabricated
+  wind number.
+* **Resolution mismatch is visible in every API/UI result**: ERA5 is hourly on
+  a 0.25° grid (about 28 km north-south). The returned value is therefore not
+  wind at a Sentinel-1 pixel or at the detected polygon, and must not be read
+  as pixel-scale ground truth. `SupplementaryEvidence.jsx` repeats this caveat
+  next to the value and states that no oil classification is inferred.
+* **Real API verification, not a fixture or cached placeholder**: Detection
+  #36 requested `include_era5: true` for a real Singapore Strait scene acquired
+  `2026-08-10T11:24:44.116503Z`. CDS returned `u10=-1.9157 m/s` and
+  `v10=+4.3549 m/s` at the nearest ERA5 hour (`11:00 UTC`) and grid point
+  `(1.15°, 103.75°)` for the scene centre `(1.20°, 103.80°)`; computed speed
+  was `4.7576 m/s`. The request/result artifact is
+  `docs/live_era5_verification_detection_36.json`.
+* **Independently re-confirmed 2026-09-14 with a different, freshly-created CDS
+  account/API key**: the environment's `cdsapi`/`xarray`/`netCDF4` dependencies
+  (listed in `requirements.txt` since the original round but not installed in
+  the active venv) were installed and confirmed importable, `tests/test_era5.py`
+  was re-run for real (8 passed, 0 skipped — the NetCDF-dependent test no
+  longer needs to skip), and one new live `POST /api/live/fetch` call with
+  `include_era5: true` was made against the same bbox/date range. It produced a
+  new detection (**#43**, `scene_id=live_1732117d409d`, requested at
+  `2026-09-14T14:51:33Z`) for the same real Sentinel-1 scene and returned
+  `status: available` with the identical wind vector and grid cell as Detection
+  #36. That match is expected, not suspicious: ERA5 is historical reanalysis
+  for a fixed past hour, so a correct query against the same
+  scene/hour must return the same values regardless of which CDS account or
+  session makes the request — it does not, by itself, prove the original
+  2026-09-06 call reached ECMWF's real servers, only that this 2026-09-14 one
+  did. The new artifact is `docs/live_era5_verification_2026-09-14.json`
+  (the original `docs/live_era5_verification_detection_36.json` is
+  unmodified and remains the record of the 2026-09-06 round).
+* **Scope boundary**: The archived holdout imagery still has no acquisition
+  timestamps, so this live-only evidence cannot be retrospectively attached to
+  those scenes. The existing opt-in Gradient Boosting lookalike filter and its
+  `apply_lookalike_filter` flag remain separate and unchanged.
+
+---
+
 ## Open Issues
 
 ### 1. `run_full_preprocessing()` has no dB/linear-scale branching — found this session
