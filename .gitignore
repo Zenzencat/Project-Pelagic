@@ -32,6 +32,8 @@ Thumbs.db
 # Large checkpoints & temp Kaggle folders
 checkpoints/model_real_final.pt
 checkpoints/model_real_v2_final.pt
+# v3 experiment checkpoints (~31MB each, not deployed -- runtime uses v2)
+checkpoints/model_real_v3*.pt
 kaggle_model_dataset/
 kaggle_output/
 kaggle_eval_output/
