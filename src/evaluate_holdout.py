@@ -39,8 +39,8 @@ def compute_metrics(pred, target):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate U-Net on holdout test set.")
-    parser.add_argument("--version", type=str, choices=["v1", "v2"], default="v2",
-                        help="Model version to evaluate (v1 or v2).")
+    parser.add_argument("--version", type=str, choices=["v1", "v2", "v3"], default="v2",
+                        help="Model version to evaluate (v1, v2, or v3).")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,7 +49,7 @@ def main():
     base_dir = os.path.abspath(".")
     
     # Select model path
-    checkpoint_name = "model_real_best.pt" if args.version == "v1" else "model_real_v2_best.pt"
+    checkpoint_name = {"v1": "model_real_best.pt", "v2": "model_real_v2_best.pt", "v3": "model_real_v3_best.pt"}[args.version]
     model_path = os.path.join(base_dir, "checkpoints", checkpoint_name)
     
     # Load model

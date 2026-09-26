@@ -1,0 +1,18 @@
+{
+  "id": "trongzen/project-pelagic-training-v3-aux-0-3",
+  "title": "Project Pelagic Training v3 Aux 0.3",
+  "code_file": "train_kaggle_v3_aux.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [
+    "shuddhabrotabanerjee/oil-spill-dartis-part1",
+    "shuddhabrotabanerjee/oil-spill-dartis-part2"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}

@@ -1,0 +1,31 @@
+metric,v1_value,v2_value,v3_value,unit,n_scenes
+oil_iou,0.7263,0.7239,0.7308,ratio,10
+oil_dice,0.8044,0.8039,0.8104,ratio,10
+oil_precision,0.8218,0.8243,0.8211,ratio,10
+oil_recall,0.8943,0.8889,0.901,ratio,10
+oil_avg_false_positive_area_km2,8.948,8.113,8.513,"km2_per_scene (real GSD, latitude-corrected)",10
+oil_avg_false_positive_pixels,99575.4,89587.6,94037.0,pixels_per_scene (scene = 2048x2048px),10
+oil_avg_false_positive_pct_of_scene,2.374,2.136,2.242,percent_of_scene_area,10
+oil_v1_outcome_bucket_counts,"{""partial"": 2, ""correct"": 8}",,,count_dict,10
+oil_v2_outcome_bucket_counts,,"{""partial"": 2, ""correct"": 8}",,count_dict,10
+oil_v3_outcome_bucket_counts,,,"{""partial"": 2, ""correct"": 8}",count_dict,10
+no_oil_iou,0.7,0.7,0.8,ratio,10
+no_oil_dice,0.7,0.7,0.8,ratio,10
+no_oil_precision,0.7,0.7,0.8,ratio,10
+no_oil_recall,1.0,1.0,1.0,ratio,10
+no_oil_avg_false_positive_area_km2,0.024,0.005,0.018,"km2_per_scene (real GSD, latitude-corrected)",10
+no_oil_avg_false_positive_pixels,300.4,64.8,225.2,pixels_per_scene (scene = 2048x2048px),10
+no_oil_avg_false_positive_pct_of_scene,0.007,0.002,0.005,percent_of_scene_area,10
+no_oil_v1_outcome_bucket_counts,"{""false_positive"": 3, ""correct"": 7}",,,count_dict,10
+no_oil_v2_outcome_bucket_counts,,"{""false_positive"": 3, ""correct"": 7}",,count_dict,10
+no_oil_v3_outcome_bucket_counts,,,"{""false_positive"": 2, ""correct"": 8}",count_dict,10
+lookalike_iou,0.0,0.0,0.0,ratio,10
+lookalike_dice,0.0,0.0,0.0,ratio,10
+lookalike_precision,0.0,0.0,0.0,ratio,10
+lookalike_recall,1.0,1.0,1.0,ratio,10
+lookalike_avg_false_positive_area_km2,148.354,134.461,139.51,"km2_per_scene (real GSD, latitude-corrected)",10
+lookalike_avg_false_positive_pixels,1733578.4,1571115.3,1628755.0,pixels_per_scene (scene = 2048x2048px),10
+lookalike_avg_false_positive_pct_of_scene,41.332,37.458,38.833,percent_of_scene_area,10
+lookalike_v1_outcome_bucket_counts,"{""false_positive"": 10}",,,count_dict,10
+lookalike_v2_outcome_bucket_counts,,"{""false_positive"": 10}",,count_dict,10
+lookalike_v3_outcome_bucket_counts,,,"{""false_positive"": 10}",count_dict,10

@@ -1,0 +1,33 @@
+metric,n_scenes,v1,v2,v3,v3-aux-0.3,v3-aux-1.0
+oil_iou,10,0.7263,0.7239,0.7308,0.7339,0.7398
+oil_dice,10,0.8044,0.8039,0.8104,0.8121,0.8142
+oil_precision,10,0.8218,0.8243,0.8211,0.8267,0.833
+oil_recall,10,0.8943,0.8889,0.901,0.8982,0.8987
+oil_avg_false_positive_pixels,10,99575.4,89587.6,94037.0,86604.7,83541.0
+oil_outcome_bucket_counts__v1,10,"{""partial"": 2, ""correct"": 8}",,,,
+oil_outcome_bucket_counts__v2,10,,"{""partial"": 2, ""correct"": 8}",,,
+oil_outcome_bucket_counts__v3,10,,,"{""partial"": 2, ""correct"": 8}",,
+oil_outcome_bucket_counts__v3-aux-0.3,10,,,,"{""partial"": 2, ""correct"": 8}",
+oil_outcome_bucket_counts__v3-aux-1.0,10,,,,,"{""partial"": 2, ""correct"": 8}"
+no_oil_iou,10,0.7,0.7,0.8,0.7,0.7
+no_oil_dice,10,0.7,0.7,0.8,0.7,0.7
+no_oil_precision,10,0.7,0.7,0.8,0.7,0.7
+no_oil_recall,10,1.0,1.0,1.0,1.0,1.0
+no_oil_avg_false_positive_pixels,10,300.4,64.8,225.2,178.5,112.5
+no_oil_outcome_bucket_counts__v1,10,"{""false_positive"": 3, ""correct"": 7}",,,,
+no_oil_outcome_bucket_counts__v2,10,,"{""false_positive"": 3, ""correct"": 7}",,,
+no_oil_outcome_bucket_counts__v3,10,,,"{""false_positive"": 2, ""correct"": 8}",,
+no_oil_outcome_bucket_counts__v3-aux-0.3,10,,,,"{""false_positive"": 3, ""correct"": 7}",
+no_oil_outcome_bucket_counts__v3-aux-1.0,10,,,,,"{""false_positive"": 3, ""correct"": 7}"
+lookalike_iou,10,0.0,0.0,0.0,0.0,0.0
+lookalike_dice,10,0.0,0.0,0.0,0.0,0.0
+lookalike_precision,10,0.0,0.0,0.0,0.0,0.0
+lookalike_recall,10,1.0,1.0,1.0,1.0,1.0
+lookalike_avg_false_positive_pixels,10,1733578.4,1571115.3,1628755.0,1600860.5,1668700.1
+lookalike_outcome_bucket_counts__v1,10,"{""false_positive"": 10}",,,,
+lookalike_outcome_bucket_counts__v2,10,,"{""false_positive"": 10}",,,
+lookalike_outcome_bucket_counts__v3,10,,,"{""false_positive"": 10}",,
+lookalike_outcome_bucket_counts__v3-aux-0.3,10,,,,"{""false_positive"": 10}",
+lookalike_outcome_bucket_counts__v3-aux-1.0,10,,,,,"{""false_positive"": 10}"
+aux_head_classification_accuracy_oil_vs_lookalike,20,,,,0.5,
+aux_head_classification_accuracy_oil_vs_lookalike,20,,,,,0.5

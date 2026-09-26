@@ -1,0 +1,18 @@
+{
+  "id": "trongzen/project-pelagic-diag-mount-paths",
+  "title": "Project Pelagic Diag Mount Paths",
+  "code_file": "diag_mount_paths.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_tpu": false,
+  "enable_internet": false,
+  "dataset_sources": [
+    "shuddhabrotabanerjee/oil-spill-dartis-part1",
+    "shuddhabrotabanerjee/oil-spill-dartis-part2"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "machine_shape": "None"
+}

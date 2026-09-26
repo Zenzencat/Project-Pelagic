@@ -1,0 +1,242 @@
+[
+  {
+    "metric": "oil_iou",
+    "v1_value": 0.7263,
+    "v2_value": 0.7239,
+    "v3_value": 0.7308,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_dice",
+    "v1_value": 0.8044,
+    "v2_value": 0.8039,
+    "v3_value": 0.8104,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_precision",
+    "v1_value": 0.8218,
+    "v2_value": 0.8243,
+    "v3_value": 0.8211,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_recall",
+    "v1_value": 0.8943,
+    "v2_value": 0.8889,
+    "v3_value": 0.901,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_area_km2",
+    "v1_value": 8.948,
+    "v2_value": 8.113,
+    "v3_value": 8.513,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_pixels",
+    "v1_value": 99575.4,
+    "v2_value": 89587.6,
+    "v3_value": 94037.0,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_avg_false_positive_pct_of_scene",
+    "v1_value": 2.374,
+    "v2_value": 2.136,
+    "v3_value": 2.242,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_v1_outcome_bucket_counts",
+    "v1_value": "{\"partial\": 2, \"correct\": 8}",
+    "v2_value": "",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_v2_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "{\"partial\": 2, \"correct\": 8}",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "oil_v3_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "",
+    "v3_value": "{\"partial\": 2, \"correct\": 8}",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_iou",
+    "v1_value": 0.7,
+    "v2_value": 0.7,
+    "v3_value": 0.8,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_dice",
+    "v1_value": 0.7,
+    "v2_value": 0.7,
+    "v3_value": 0.8,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_precision",
+    "v1_value": 0.7,
+    "v2_value": 0.7,
+    "v3_value": 0.8,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_recall",
+    "v1_value": 1.0,
+    "v2_value": 1.0,
+    "v3_value": 1.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_area_km2",
+    "v1_value": 0.024,
+    "v2_value": 0.005,
+    "v3_value": 0.018,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_pixels",
+    "v1_value": 300.4,
+    "v2_value": 64.8,
+    "v3_value": 225.2,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_avg_false_positive_pct_of_scene",
+    "v1_value": 0.007,
+    "v2_value": 0.002,
+    "v3_value": 0.005,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_v1_outcome_bucket_counts",
+    "v1_value": "{\"false_positive\": 3, \"correct\": 7}",
+    "v2_value": "",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_v2_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "{\"false_positive\": 3, \"correct\": 7}",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "no_oil_v3_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "",
+    "v3_value": "{\"false_positive\": 2, \"correct\": 8}",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_iou",
+    "v1_value": 0.0,
+    "v2_value": 0.0,
+    "v3_value": 0.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_dice",
+    "v1_value": 0.0,
+    "v2_value": 0.0,
+    "v3_value": 0.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_precision",
+    "v1_value": 0.0,
+    "v2_value": 0.0,
+    "v3_value": 0.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_recall",
+    "v1_value": 1.0,
+    "v2_value": 1.0,
+    "v3_value": 1.0,
+    "unit": "ratio",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_area_km2",
+    "v1_value": 148.354,
+    "v2_value": 134.461,
+    "v3_value": 139.51,
+    "unit": "km2_per_scene (real GSD, latitude-corrected)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_pixels",
+    "v1_value": 1733578.4,
+    "v2_value": 1571115.3,
+    "v3_value": 1628755.0,
+    "unit": "pixels_per_scene (scene = 2048x2048px)",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_avg_false_positive_pct_of_scene",
+    "v1_value": 41.332,
+    "v2_value": 37.458,
+    "v3_value": 38.833,
+    "unit": "percent_of_scene_area",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_v1_outcome_bucket_counts",
+    "v1_value": "{\"false_positive\": 10}",
+    "v2_value": "",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_v2_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "{\"false_positive\": 10}",
+    "v3_value": "",
+    "unit": "count_dict",
+    "n_scenes": 10
+  },
+  {
+    "metric": "lookalike_v3_outcome_bucket_counts",
+    "v1_value": "",
+    "v2_value": "",
+    "v3_value": "{\"false_positive\": 10}",
+    "unit": "count_dict",
+    "n_scenes": 10
+  }
+]

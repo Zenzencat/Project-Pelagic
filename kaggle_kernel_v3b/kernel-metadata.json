@@ -1,0 +1,20 @@
+{
+  "id": "trongzen/project-pelagic-training-v3b-weighted",
+  "title": "Project Pelagic Training v3b Weighted",
+  "code_file": "train_eval_kaggle_v3b.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [
+    "shuddhabrotabanerjee/oil-spill-dartis-part1",
+    "shuddhabrotabanerjee/oil-spill-dartis-part2",
+    "trongzen/project-pelagic-model-best",
+    "trongzen/project-pelagic-holdout-30"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "machine_shape": "NvidiaTeslaT4"
+}
