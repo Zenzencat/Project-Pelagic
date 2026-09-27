@@ -116,8 +116,15 @@ def main():
         # Save viz
         if scene_id in viz_scenes:
             fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-            axes[0].imshow(norm[..., 0], cmap='gray')
-            axes[0].set_title(f"SAR VV Channel - {scene_id}")
+            # The dataset stores index 0 = VH, index 1 = VV
+            # (docs/CHANNEL_ORDER_INVESTIGATION.md). Show raw VV dB with a
+            # 2-98 percentile stretch over valid pixels: the model's -25..0 dB
+            # normalized input is too dark to read as a figure.
+            vv_db = img_raw[..., 1]
+            valid = vv_db != 0
+            lo, hi = np.percentile(vv_db[valid], [2, 98]) if valid.any() else (-25.0, 0.0)
+            axes[0].imshow(np.where(valid, vv_db, np.nan), cmap='gray', vmin=lo, vmax=hi)
+            axes[0].set_title(f"SAR VV (channel 1), {lo:.0f} to {hi:.0f} dB - {scene_id}")
             axes[0].axis('off')
             
             axes[1].imshow(mask_raw, cmap='plasma')

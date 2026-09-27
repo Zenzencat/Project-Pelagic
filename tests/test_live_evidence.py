@@ -122,6 +122,23 @@ def test_empty_primary_has_no_fabricated_polygon(api, live_payload):
     assert result['detection']['geojson_mask']['coordinates'] == []
 
 
+def test_live_sar_preview_uses_vv_band_index_1(api, monkeypatch):
+    """Live GeoTIFFs use the training layout (index 0 = VH, index 1 = VV), so the
+    VV preview must read index 1 (docs/CHANNEL_ORDER_INVESTIGATION.md)."""
+    import base64
+    import cv2
+    import numpy as np
+    raster = np.empty((256, 256, 2), dtype=np.float32)
+    raster[..., 0] = 1e-4  # VH, -40 dB -> black after the -25..0 dB stretch
+    raster[..., 1] = 0.1   # VV, -10 dB -> 0.6 * 255
+    monkeypatch.setattr(api.tifffile, 'imread', lambda *a: raster)
+    product = {'start': '2026-08-11T22:47:44Z', 'end': '2026-08-11T22:48:09Z'}
+    observation, _, _ = api._analyze_live_scene('scene.tif', 'preview_order', product, {})
+    png = base64.b64decode(observation['sar_preview'].split(',', 1)[1])
+    gray = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert np.all(gray == 153)
+
+
 def test_comparison_results_and_failure_modes(api, live_payload, monkeypatch):
     from test_observations import product
     import numpy as np
