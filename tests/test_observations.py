@@ -113,6 +113,9 @@ def test_fetch_validates_pixels_and_interval(monkeypatch, tmp_path):
         # zero tiles (verified against a real Process response, docs/status.md).
         assert body['input']['data'][0]['dataFilter']['timeRange'] == {
             'from': '2026-08-11T22:00:00Z', 'to': '2026-08-11T22:00:26Z'}
+        # Live bands must use the training layout: index 0 = VH, index 1 = VV
+        # (docs/CHANNEL_ORDER_INVESTIGATION.md).
+        assert 'default: [samples[0].VH, samples[0].VV]' in body['evalscript']
         return files, {'tiles': [{'sentinel1ProductId': selected['name'], 'date': selected['start']}]}
     monkeypatch.setattr('src.data.sentinel_process.process_request', process)
     path = tmp_path / 'scene.tif'

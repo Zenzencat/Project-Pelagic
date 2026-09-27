@@ -1,9 +1,10 @@
 """Live Sentinel-1 GRD discovery and calibrated GeoTIFF retrieval.
 
 Reuses public CDSE OData search, shared OAuth authentication (at the caller),
-and shared Sentinel Hub Process transport. Requests sigma0 VV/VH at the chosen
+and shared Sentinel Hub Process transport. Requests sigma0 VH/VV at the chosen
 catalog acquisition interval, then validates source product names, dates,
-valid-pixel coverage and GeoTIFF bounds before accepting the pixels.
+valid-pixel coverage and GeoTIFF bounds before accepting the pixels. Output
+band order is index 0 = VH, index 1 = VV, matching the training data.
 
 The original day-window client was externally tested in earlier sessions.
 The strict source/coverage path added on 2026-09-05 is locally tested only;
@@ -118,7 +119,9 @@ function setup() {
 }
 function evaluatePixel(samples) {
   if (!samples.length) return {default: [0, 0], validity: [0]};
-  return {default: [samples[0].VV, samples[0].VH], validity: [samples[0].dataMask]};
+  // Band order matches the Trujillo-Acatitla training GeoTIFFs the checkpoints
+  // were trained on: index 0 = VH, index 1 = VV (docs/CHANNEL_ORDER_INVESTIGATION.md).
+  return {default: [samples[0].VH, samples[0].VV], validity: [samples[0].dataMask]};
 }
 function updateOutputMetadata(scenes, inputMetadata, outputMetadata) {
   outputMetadata.userData = {tiles: [].concat.apply([], scenes.orbits.map(o => o.tiles))};
@@ -130,7 +133,7 @@ function updateOutputMetadata(scenes, inputMetadata, outputMetadata) {
         pixels = tifffile.imread(io.BytesIO(files['default.tif']))
         valid = tifffile.imread(io.BytesIO(files['validity.tif']))
         if pixels.shape != (height, width, 2) or not np.isfinite(pixels).all() or (pixels < 0).any():
-            raise ValueError('Invalid calibrated VV/VH raster')
+            raise ValueError('Invalid calibrated VH/VV raster')
         if valid.shape != (height, width) or not (valid == 1).all():
             raise ValueError('Selected product does not provide valid data throughout the requested footprint')
         from src.analysis.geoutils import get_scene_geolocation

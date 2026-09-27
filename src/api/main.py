@@ -493,7 +493,8 @@ def _analyze_live_scene(img_path, scene_id, product, provenance):
     if not cv2.imwrite(os.path.join(mask_dir, f'{scene_id}_mask.png'), preds):
         raise ValueError('Could not save segmentation mask')
     # Fixed VV dB display stretch makes different passes visually comparable.
-    vv_db = 10 * np.log10(np.maximum(image_raw[:, :, 0], 1e-10))
+    # Live GeoTIFFs use the training layout (index 0 = VH, index 1 = VV).
+    vv_db = 10 * np.log10(np.maximum(image_raw[:, :, 1], 1e-10))
     gray = (np.clip((vv_db + 25) / 25, 0, 1) * 255).astype(np.uint8)
     overlay = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     overlay[preds == 255] = (0.45 * overlay[preds == 255] + 0.55 * np.array([0, 215, 255])).astype(np.uint8)
