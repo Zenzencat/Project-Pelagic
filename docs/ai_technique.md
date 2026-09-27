@@ -92,3 +92,17 @@ We utilize the three-part Sentinel-1 SAR Oil Spill Image Dataset by Trujillo-Aca
 | **Focal Loss** | ฟังก์ชันการสูญเสียโฟคัล | ฟังก์ชันความสูญเสียที่เน้นการปรับค่าน้ำหนักให้กับพิกเซลที่เรียนรู้ได้ยาก |
 | **Intersection over Union (IoU)** | ดัชนีวัดการซ้อนทับกันของพื้นที่ | อัตราส่วนพื้นที่ส่วนที่ซ้อนทับกัน (อินเตอร์เซกชัน) หารด้วยพื้นที่รวม (ยูเนียน) |
 | **Overfitting** | การเรียนรู้จำเพาะเกินไป | ปัญหาที่โมเดลจดจำข้อมูลชุดฝึกสอนได้ดีเยี่ยม แต่ไม่สามารถประมวลผลข้อมูลใหม่ได้ดี |
+
+---
+
+## 7. Reference-Paper Comparison: Image Classifier vs. Wind Context
+
+Trujillo-Acatitla et al. (2024) use a purely image-based two-step approach:
+a CNN first classifies SAR imagery, then a U-Net segments the selected scenes.
+Pelagic does not reproduce that classifier stage. For live scenes only, it can
+optionally show ERA5 10 m wind as separate physical context alongside the
+U-Net result. This is a technique the reference paper does not use: it relies
+on hourly reanalysis wind rather than additional image features. ERA5's 0.25°
+grid is roughly 28 km north-south, so it is not wind at the SAR pixel or slick
+polygon; it is displayed for a human reviewer and never automatically changes
+the segmentation, confidence, or oil/lookalike decision.

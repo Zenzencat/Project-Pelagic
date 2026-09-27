@@ -223,8 +223,8 @@ Comparative 3-panel plots (SAR VV, Ground Truth, Prediction) are outputted to th
 
 ### Lookalike False Alarm Suppression Analysis
 * **Binary Metric Null Result**: Both models return `0.0000` for all lookalike metrics. This is because lookalike features (such as wind shadows and biogenic films) produce backscatter reduction signatures identical to oil slicks, causing U-Net to predict false positive pixels on every scene (binary score `0.0`).
-* **Continuous Pixel-Level Reduction**: Comparing the raw predicted positive pixel counts reveals that **U-Net v2 consistently reduced lookalike false positives by 10% to 45%** across all lookalike test scenes. For example, on `lookalike_00003`, false positive pixels dropped from `1,815` (v1) to `1,004` (v2). This confirms that hard-negative oversampling successfully regularized background predictions, even if it did not suppress them completely to zero.
-  *(Note: `docs/status.md` gives a more carefully verified framing of this metric — average false-positive area 41.3% → 37.5% of scene area. The 10–45% range describes spread across individual scenes, not the typical improvement.)*
+* **Continuous Pixel-Level Reduction**: Comparing the raw predicted positive pixel counts reveals that **U-Net v2 reduced lookalike false positives on every lookalike test scene, by 1.9% to 44.7% per scene** (3 of 10 scenes improved by less than 10%). The largest relative drop is on `lookalike_00003`, where false positive pixels fell from `1,815` (v1) to `1,004` (v2) — a scene with an unusually small false-positive area to begin with. This confirms that hard-negative oversampling successfully regularized background predictions, even if it did not suppress them completely to zero.
+  *(Note: `docs/status.md` gives a more carefully verified framing of this metric — average false-positive area 41.3% → 37.5% of scene area. The 1.9–44.7% range describes spread across individual scenes, not the typical improvement.)*
 
 ---
 

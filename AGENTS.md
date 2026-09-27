@@ -33,12 +33,14 @@ nearby AIS vessels rendered on a Leaflet map dashboard.
 ## Known trap: README vs. status.md disagree on one number
 
 README's "Lookalike False Alarm Suppression Analysis" section frames the v1→v2
-improvement as a "10% to 45%" per-scene pixel reduction. `docs/status.md`
-(session 5, more recent and more carefully verified) corrects this: the
-*average* false-positive area dropped from 41.3% to 37.5% of scene area —
-real, but more modest than the README's framing implies. The 10-45% range in
-the README describes spread across individual scenes, not the typical
-improvement. **Prefer status.md's framing** if asked about this metric, and
+improvement as a "1.9% to 44.7%" per-scene pixel reduction (corrected
+2026-09-27 from a misstated "10% to 45%"; recomputed from
+`docs/holdout_per_scene_results.json`, 3 of 10 lookalike scenes are under
+10%). `docs/status.md` (session 5, more recent and more carefully verified)
+gives the better headline: the *average* false-positive area dropped from
+41.3% to 37.5% of scene area — real, but more modest than the per-scene
+range suggests. The 1.9–44.7% range in the README describes spread across
+individual scenes, not the typical improvement. **Prefer status.md's framing** if asked about this metric, and
 flag the discrepancy rather than silently repeating either figure.
 
 ## Structural notes worth knowing before editing

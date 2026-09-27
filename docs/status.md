@@ -311,7 +311,7 @@ automated regression tests and frontend checks on pushes/PRs.
 Historical evaluation was not rerun in this session. The 30-scene holdout spans
 six regions. Both real checkpoints have lookalike IoU/Dice zero on all ten
 lookalike scenes. Mean false-positive scene area falls from **41.3% to 37.5%**
-(148.4 to 134.5 km²). README's 10–45% range describes individual scenes, not the
+(148.4 to 134.5 km²). README's per-scene range (1.9–44.7%, from `docs/holdout_per_scene_results.json`; formerly misstated as 10–45%) describes individual scenes, not the
 typical improvement. Scheduler/pooled metrics differ, so this is not an isolated
 oversampling ablation.
 
