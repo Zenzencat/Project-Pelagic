@@ -43,6 +43,37 @@ range suggests. The 1.9–44.7% range in the README describes spread across
 individual scenes, not the typical improvement. **Prefer status.md's framing** if asked about this metric, and
 flag the discrepancy rather than silently repeating either figure.
 
+## Known trap: SAR channel order is (VH, VV), not (VV, VH)
+
+The Trujillo-Acatitla GeoTIFFs store **index 0 = VH, index 1 = VV**. Many
+docstrings and comments still say "(VV, VH)"; those are only right for
+synthetic scenes (`generate_synthetic.py`). Established 2026-09-27 in
+[`docs/CHANNEL_ORDER_INVESTIGATION.md`](docs/CHANNEL_ORDER_INVESTIGATION.md):
+- slick contrast is in index 1 in 10/10 holdout oil scenes;
+- the checkpoints score best on the stored layout;
+- a third-party audit reports SNAP band names in that order.
+
+No dataset-author statement exists; the Zenodo notes merely list "(VV, VH)".
+
+- **Live fetch was swapped until 2026-09-27.** `src/data/cdse_fetch.py` now
+  writes `[VH, VV]`, and the live VV preview reads index 1. Both are pinned
+  by tests (`test_fetch_validates_pixels_and_interval`,
+  `test_live_sar_preview_uses_vv_band_index_1`). Don't "fix" them back to
+  VV-first.
+- **Pre-fix live output is invalid.**
+  - The segmentation of every pre-fix live detection (#31, #32, #36, #43)
+    came from swapped input. #43 is kept and marked in
+    `supplementary.original.channel_order`; its ERA5 value is still valid.
+  - The 12 pre-fix GeoTIFFs in `data/raw/live/` are old-layout `[VV, VH]`.
+- **Anything reading `image_raw[..., 0]` on real data is reading VH**, the
+  noise-floor band. That includes the lookalike classifier's texture
+  features (`lookalike_filter.py`, `kaggle_kernel_lookalike/`,
+  `scripts/lookalike_feature_separability_check.py`). **Open item:**
+  re-run that feature extraction on index 1 before judging the filter
+  further.
+- The fixed −25..0 dB window clips ~99.9 % of VH over sea to 0, so the U-Net
+  is effectively VV-only. Changing that needs retraining.
+
 ## Structural notes worth knowing before editing
 
 - **`src/data/preprocess.py::run_full_preprocessing()` now delegates
@@ -75,6 +106,10 @@ flag the discrepancy rather than silently repeating either figure.
   `CDSE_CLIENT_SECRET`, `GFW_TOKEN`, and `CDSAPI_KEY` were all verified authenticated
   and functional in 2026-09-06 live end-to-end tests (Detections #31, #32, and #36).
   ERA5 10m wind vector retrieval returned 4.76 m/s at 11:00 UTC for Detection #36.
+  The U-Net output of those runs used swapped channels (see the channel-order
+  trap above). Transport and credential verification stands. Post-fix live
+  runs on 2026-09-27 (Singapore, Stockholm, Chonos) completed OK with land
+  masking and GFW attribution.
 - **Checkpoints**: `checkpoints/model_real_best.pt` (v1) and
   `checkpoints/model_real_v2_best.pt` (v2, current default) are the real
   trained models; `best_model.pth` / `latest.pth` are older/synthetic-run
@@ -88,9 +123,13 @@ flag the discrepancy rather than silently repeating either figure.
   Sentinel-2 optical) are now built and wired into the **live** path, but they
   cannot be applied to the holdout/training scenes at all: **this dataset has
   no acquisition timestamps anywhere**, confirmed against the Zenodo deposits
-  directly. SAR-optical fusion via DSen2-CR was stopped for good by explicit
-  decision. See status.md for full detail — don't re-investigate this from
-  scratch.
+  directly. **Open, unverified (2026-09-27):** a third-party audit reports
+  acquisition times (2015–2019) and source product IDs inside the Part I
+  TIFFs' embedded SNAP metadata (tag 65000), which the Zenodo-level check
+  didn't look at. Verify against one original Part I image before relying on
+  either claim. The local Part III copies carry no tag 65000.
+  SAR-optical fusion via DSen2-CR was stopped for good by explicit
+  decision. See status.md for full detail.
 - **Supplementary evidence on `POST /api/live/fetch`** (added 2026-09-05,
   Tasks 1–3 of `prompt/pelagic-loop.md`): three opt-in sources, all defaulting
   to `false`, all surfacing evidence only — **none of them produces an oil,
@@ -137,7 +176,10 @@ flag the discrepancy rather than silently repeating either figure.
   An ESSD/PANGAEA external dataset was tried as a training source and
   **explicitly rejected** — its texture signal is JPG-domain-specific and does
   not transfer to this project's raw-dB SAR (status.md Phase 1). Don't retry
-  training on ESSD without reading that finding.
+  training on ESSD without reading that finding. **Caveat (2026-09-27):**
+  that comparison also crossed polarizations. ESSD is VV-only, while the
+  own-domain features came from index 0 = VH. So the rejection's stated
+  reason is incomplete, though this doesn't show ESSD would transfer.
 - **`src/analysis/candidate_region_features.py`** is the single source of truth
   for the GLCM/edge/shape feature definitions, shared by the feasibility-check
   script, the ESSD script, and the live filter — mirror any change across all

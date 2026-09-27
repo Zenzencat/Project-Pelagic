@@ -206,7 +206,7 @@ python src/evaluate_holdout.py --version v2
 # Evaluate the U-Net v1 model
 python src/evaluate_holdout.py --version v1
 ```
-Comparative 3-panel plots (SAR VV, Ground Truth, Prediction) are outputted to the `docs/` folder (e.g. `docs/holdout_v2_viz_oil_00000.png`).
+Comparative 3-panel plots (SAR VV from channel 1, Ground Truth, Prediction) are outputted to the `docs/` folder (e.g. `docs/holdout_v2_viz_oil_00000.png`).
 
 ### Before/After Evaluation Results
 

@@ -1,12 +1,81 @@
 # Project Pelagic: Status & Handoff
 
-Updated 2026-09-06 for the live external credential verification pass
+Updated 2026-09-27 for the SAR channel-order fix (see "Channel order" below).
+Previously updated 2026-09-06 for the live external credential verification pass
 (`prompt/pelagic-credential-verification.md`) and Tasks 3–8 execution
 (CI, decoupled DB seeding, multi-temporal SAR, Sentinel-2 optical, calibration audit).
 Earlier research and historical verification remain in [status_history.md](status_history.md).
 
 2026-09-06: `prompt/pelagic-credential-verification.md` §5 (GFW AIS attribution)
 closed out — see "GFW AIS attribution" under Live credential verification.
+
+2026-09-27: **SAR channel-order fix.** The Trujillo-Acatitla GeoTIFFs (training
+and holdout) store **index 0 = VH, index 1 = VV**, not the `(VV, VH)` the code
+assumed. The live Sentinel Hub evalscript wrote `[VV, VH]`, so every live
+inference before this fix fed the U-Net swapped channels. The evalscript now
+writes `[VH, VV]` and the live VV preview reads index 1. No retraining; the
+checkpoints are unchanged. Evidence, ablation and open items are in
+[CHANNEL_ORDER_INVESTIGATION.md](CHANNEL_ORDER_INVESTIGATION.md) and are
+summarised in the sections below.
+
+## Channel order (2026-09-27)
+
+- **Layout:** training (Parts I/II) and holdout (Part III) scenes are `[VH, VV]`.
+  - No dataset-author statement of the band order exists that we could access.
+    The Zenodo notes and paper captions only list "(VV, VH)".
+  - Evidence 1: slick contrast is in index 1 in 10/10 holdout oil scenes
+    (−5.8 to −8.4 dB) and ~0 dB in index 0.
+  - Evidence 2: index 0 < index 1 in 27/29 valid scenes, the opposite sign to
+    known-order live scenes.
+  - Evidence 3: both checkpoints score best on the stored layout (v2 mean oil
+    IoU 0.724 stored vs 0.534 swapped).
+  - Evidence 4: a third-party audit reports SNAP band names `Sigma0_VH_db`,
+    `Sigma0_VV_db` embedded in Part I (not verified locally).
+- **Live path, fixed:**
+  - `src/data/cdse_fetch.py` now returns `[samples[0].VH, samples[0].VV]`.
+  - `_analyze_live_scene` builds the VV preview from index 1.
+  - Tests: `test_fetch_validates_pixels_and_interval` asserts the evalscript
+    order, and `test_live_sar_preview_uses_vv_band_index_1` pins the preview
+    band.
+  - Live re-runs after the fix (Detections #44–#47, rolled back with the DB
+    restore):
+    - Singapore Strait, same product as #43: raw predicted oil fell from
+      14.8 % of the scene to 14,327 px (0.34 %).
+    - Stockholm: 41,272 raw px.
+    - Chonos: 57,628 raw px.
+    - All three returned OK with land masking and GFW attribution working.
+
+- **Pre-fix live records are kept but marked.**
+  - Detection #43 (`live_1732117d409d`) has an `original.channel_order` field,
+    and a sentence on its `preview_note`, stating that its mask and confidence
+    came from swapped input. Its ERA5 evidence (4.76 m/s) is unaffected and
+    still valid.
+  - The 12 GeoTIFFs in `data/raw/live/` that predate the fix are `[VV, VH]`,
+    the old layout (listed in CHANNEL_ORDER_INVESTIGATION.md §4a).
+  - The segmentation outputs of the 2026-09-05/06 verification runs
+    (#31/#32/#36) were likewise swapped-input. Their transport, credential,
+    GFW, S2 and ERA5 verification stands.
+- **`/api/predict` on holdout scenes was never affected.**
+- **Open items (not done):**
+  1. The post-hoc lookalike classifier's GLCM/edge features read
+     `image_raw[..., 0]`, which is VH, the noise-floor band with ~0 dB slick
+     contrast. It needs re-running on index 1 (VV) before any further
+     judgement of that filter.
+  2. The ESSD/PANGAEA rejection (Phase 1) compared VV-only ESSD patches
+     against own-domain features taken from VH. That's a polarization
+     confound on top of the JPG-domain reason.
+  3. **Unverified:** the same third-party audit reports acquisition times
+     (2015-03-12 to 2019-10-30) and source product IDs in the Part I
+     DIMAP metadata (TIFF tag 65000). That would contradict "no acquisition
+     timestamps". Verifying needs one original Part I image; the local
+     Part III copies and Part I/II masks carry no tag 65000.
+  4. The −25..0 dB window clips ~99.9 % of VH over sea to 0, so the model is
+     effectively VV-only. Changing it needs retraining.
+  5. Synthetic scenes (`generate_synthetic.py`) are still `[VV, VH]`, i.e.
+     swapped for the real checkpoint on `/api/predict`.
+  6. `no_oil_00005` (all zeros): the app and `evaluate_holdout.py` give a 100 %
+     false positive, while the committed `holdout_per_scene_results.json`
+     says "correct". See "Evaluation" below.
 
 ## Current environment and scope
 
@@ -16,9 +85,9 @@ closed out — see "GFW AIS attribution" under Live credential verification.
 - Environment is Python 3.11.9 (`.venv`) on Windows. All dependencies from `requirements.txt`
   plus optional NetCDF stack (`cdsapi`, `xarray`, `netCDF4`) are satisfied.
   `pytest.ini` configures `pythonpath = .` for direct invocation.
-- Real v2/v1 checkpoints and synthetic TIFFs are present. The requested
-  `oil_00000`, `no_oil_00004` and `lookalike_00000` holdout TIFFs remain absent
-  for offline holdout inference, but live CDSE fetching is completely functional.
+- Real v2/v1 checkpoints and synthetic TIFFs are present. All 30 holdout TIFFs
+  and masks are present in the main checkout's ignored `data/holdout/` (verified
+  2026-09-27), and live CDSE fetching is functional.
 - This session verified live CDSE Sentinel-1 SAR acquisition, tiled U-Net inference,
   OSM land masking, GFW AIS vessel matching, multi-temporal revisit SAR,
   Sentinel-2 true-color optical RGB, and ERA5 10m reanalysis wind evidence. Previews
@@ -58,7 +127,7 @@ exists, `src/api/preview_storage.py` converts the known preview slots to files.
 ## Current verification
 
 - Full test suite: `pytest tests -k "not symlink" -v`:
-  **78 passed, 0 skipped, 0 failures** (including `tests/test_era5.py::test_netcdf_selection_and_request` with installed `xarray` and `netCDF4`).
+  **80 passed, 0 skipped, 0 failures** (2026-09-27, incl. the two channel-order regression tests) (including `tests/test_era5.py::test_netcdf_selection_and_request` with installed `xarray` and `netCDF4`).
 - Unit tests cover decoupled database initialization: `tests/test_database_seeding.py`
   proves that `init_db(seed_demo=False)` leaves fresh databases empty, while
   `scripts/seed_demo_data.py` explicitly populates demo scenes when desired.
@@ -283,7 +352,7 @@ See [cloud_removal_scoping.md](cloud_removal_scoping.md) and historical reports.
 
 ## Existing application, model and QC state
 
-FastAPI → CDSE catalog/auth/Process → calibrated VV/VH TIFF →
+FastAPI → CDSE catalog/auth/Process → calibrated VH/VV TIFF (index 0 = VH, index 1 = VV, matching training) →
 `preprocess_for_prediction(..., already_calibrated=True)` → tiled U-Net →
 land mask/contours → SQLite → React/Leaflet. Optional evidence follows primary
 inference. Four cached demo records coexist with live mode, but local holdout
@@ -328,13 +397,34 @@ confusion_matrix_breakdown, region_coverage and phase4_confirm_* in docs.
   remains disabled by default; only `/api/predict` exposes its opt-in flag.
 - ESSD/PANGAEA JPG-domain texture did not transfer to raw-dB SAR; rejected.
   Do not retrain on it without reading the historical Phase 1 finding.
+  **Caveat (2026-09-27):** that comparison crossed polarizations. ESSD is
+  VV-only; our own-domain features came from index 0 = VH. The same applies
+  to the classifier itself. See "Channel order" above.
+- `no_oil_00005` is all zeros in both bands, so it has no negative dB value.
+  - Since `ac8c318` (2026-09-05), `run_full_preprocessing()` delegates to
+    `preprocess_for_prediction()`. That function's `np.any(image_raw < 0)`
+    dB/linear test routes an all-zero scene down the **linear** branch:
+    0 → −50 dB → normalized 0 (black) → 100 % predicted oil.
+  - `/api/predict` has had that branch inline since at least `953e5dc`
+    (2026-08-15).
+  - `evaluate_holdout.py` has followed it since `ac8c318`.
+  - `src/compare_checkpoints.py`, which wrote `holdout_per_scene_results.json`
+    on 2026-08-15, keeps its own always-dB `preprocess()`: 0 dB → normalized
+    1.0 → 0 % predicted.
+  - Verified 2026-09-27 on v2: 0.0 % vs 100.0 % on the same scene and model.
+  - Not fixed, and only this scene is affected: the other 29 holdout scenes
+    contain negative dB and reproduce the committed JSON pixel-for-pixel.
 - Own-domain features used 1,200 oil / 685 lookalike scenes and 1,857 usable
   candidates. Large-blob oversampling did not rescue holdout oil. Kaggle sklearn
   version skew can require local refit from saved features and train/val split.
 - `candidate_region_features.py` remains the shared feature definition source.
-- Zenodo training/holdout scenes have no acquisition timestamps. Matching them
-  to external temporal/wind/optical sources remains blocked; do not repeat that
-  completed investigation. Live catalog observations do have timestamps.
+- The Zenodo deposits expose no acquisition timestamps. Matching the scenes
+  to external temporal/wind/optical sources remains blocked on that basis.
+  Live catalog observations do have timestamps. **Open, unverified
+  (2026-09-27):** a third-party audit reports acquisition times inside the
+  Part I TIFFs' SNAP metadata (tag 65000), which the earlier investigation
+  didn't check. See "Channel order" open item 3 before treating this as
+  settled either way.
 - An oversampling ablation needs a separately authorized GPU training run.
 - Synthetic calibration ambiguity audit is completed in `docs/synthetic_calibration_audit.md`:
   generator emitted linear power $\sigma^0$ while Level-1 calibration squared DN amplitude.
@@ -345,7 +435,11 @@ The live credential verification checklist in
 `prompt/pelagic-credential-verification.md` is **100% verified and completed across all services**:
 - **Real live Sentinel-1 detection**: Verified (Detection #31, #32, and #36). Downloaded
   calibrated SAR raster via CDSE Process API, ran tiled U-Net inference,
-  executed OSM land masking, and persisted previews to disk.
+  executed OSM land masking, and persisted previews to disk. **The segmentation
+  from these runs used swapped channels** (pre-2026-09-27 evalscript). The
+  transport and plumbing verification stands. Post-fix live runs on 2026-09-27
+  (Singapore, Stockholm, Chonos) completed OK, with land masking and GFW
+  attribution working.
 - **GFW AIS vessel attribution**: Verified (honest `empty` for 2026-08-10 scene; real commercial vessels confirmed on 2026-08-09 and 2026-08-11).
 - **Multi-temporal SAR comparison**: Verified (`available`). Prioritized COG products
   in ranking and supported packaging normalization via `removesuffix('_COG')` in `verify_sources()`,
@@ -362,9 +456,13 @@ The live credential verification checklist in
 
 ## Next action
 
-Restore the three required holdout TIFFs to complete the handoff's six real
-offline `/api/predict` inference checks. All live production paths (CDSE Process
+Work through the channel-order open items above. Most valuable first:
+1. Re-run the lookalike-classifier feature extraction on index 1 (VV).
+2. Verify (or refute) the Part I embedded timestamps from one original image.
+
+The holdout TIFFs are now present locally, so the handoff's offline
+`/api/predict` inference checks can also be run. All live production paths (CDSE Process
 Sentinel-1 SAR, GFW AIS attribution, multi-temporal SAR revisit comparison,
 Sentinel-2 optical RGB supplement, and ECMWF ERA5 10m wind reanalysis) are
 fully authenticated, verified against real external services, and documented with
-clean test coverage (78 passed tests).
+clean test coverage (80 passed tests, 2026-09-27).
